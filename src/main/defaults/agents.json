@@ -1,0 +1,77 @@
+{
+  "terminal": {
+    "label": "Terminal",
+    "command": "",
+    "color": "#adadad",
+    "kind": "shell"
+  },
+  "claude": {
+    "label": "Claude Code",
+    "command": "claude",
+    "color": "#d97757",
+    "resumePickerCommand": "{command} --resume",
+    "resumeCommand": "{command} --resume {conversationId}",
+    "resumeFailurePattern": "No\\s+conversation\\s+found\\s+with\\s+session\\s+ID",
+    "chatPromptPattern": "^[^\\S\\r\\n]*[❯›>](?:[^\\S\\r\\n]+(.*)|[^\\S\\r\\n]*)$",
+    "chatTitlePattern": "^\\s*(?:[└⎿]\\s*)?(?:Session|Conversation|Thread) renamed to:\\s*(.+)$|^─{3,} +(.+?) +─ *$",
+    "conversationHistory": {
+      "format": "transcript-jsonl",
+      "path": "~/.claude/projects/{projectKey}"
+    },
+    "icon": {
+      "file": "agent-icons/provider-1.png",
+      "monochrome": true
+    }
+  },
+  "codex": {
+    "label": "Codex CLI",
+    "command": "codex",
+    "color": "#10a37f",
+    "resumePickerCommand": "{command} resume",
+    "resumeCommand": "{command} resume {conversationId}",
+    "resumeFailurePattern": "No\\s+saved\\s+session\\s+found\\s+with\\s+ID",
+    "chatPromptPattern": "^[^\\S\\r\\n]*[❯›>](?:[^\\S\\r\\n]+(.*)|[^\\S\\r\\n]*)$",
+    "chatTitlePattern": "^\\s*(?:[└⎿]\\s*)?(?:Session|Conversation|Thread) renamed to:\\s*(.+)$|^[^\\n]* · (?:/|~)[^\\n]* · ([^\\n]+)$",
+    "conversationHistory": {
+      "format": "sqlite",
+      "path": "~/.codex/state_5.sqlite",
+      "query": "SELECT id AS conversationId, COALESCE(NULLIF(name, ''), title) AS title, cwd AS projectPath, substr(first_user_message, 1, 400) AS firstMessage, created_at * 1000 AS createdAt, updated_at * 1000 AS updatedAt FROM threads WHERE cwd = $projectPath AND (source = 'cli' OR originator = 'codex-tui') ORDER BY updated_at DESC LIMIT 100",
+      "activity": {
+        "path": "~/.codex/history.jsonl",
+        "idField": "session_id",
+        "textField": "text",
+        "timestampField": "ts",
+        "timestampUnit": "seconds"
+      }
+    },
+    "icon": {
+      "file": "agent-icons/provider-2.png",
+      "monochrome": false
+    }
+  },
+  "agy": {
+    "label": "Antigravity",
+    "command": "agy",
+    "color": "#4285f4",
+    "resumePickerCommand": "{command} --continue",
+    "resumeCommand": "{command} --conversation {conversationId}",
+    "resumeFailurePattern": "conversation\\s+.*\\s+not\\s+found",
+    "chatPromptPattern": "^[^\\S\\r\\n]*[❯›>](?:[^\\S\\r\\n]+(.*)|[^\\S\\r\\n]*)$",
+    "chatTitlePattern": "^\\s*(?:[└⎿]\\s*)?(?:Session|Conversation|Thread) renamed to:\\s*(.+)$",
+    "conversationHistory": {
+      "format": "sqlite",
+      "path": "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "query": "SELECT conversation_id AS conversationId, title, workspace_uris AS projectPaths, last_modified_time AS updatedAt FROM conversation_summaries WHERE workspace_uris LIKE '%' || $projectPath || '%' ORDER BY last_modified_time DESC LIMIT 100",
+      "activity": {
+        "path": "~/.gemini/antigravity-cli/history.jsonl",
+        "idField": "conversationId",
+        "textField": "display",
+        "timestampField": "timestamp"
+      }
+    },
+    "icon": {
+      "file": "agent-icons/provider-3.png",
+      "monochrome": false
+    }
+  }
+}

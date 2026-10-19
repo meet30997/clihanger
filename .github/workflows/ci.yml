@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Verify (macOS)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules (node-pty)
+        run: npm run rebuild
+
+      - name: JavaScript syntax check
+        run: find src scripts -name '*.js' -exec node --check {} +
+
+      - name: Shell script syntax check
+        run: find scripts -name '*.sh' -exec bash -n {} +
+
+      - name: Packaging smoke test (electron-builder)
+        run: npx electron-builder --mac --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false

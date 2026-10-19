@@ -1,0 +1,19 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+npm-debug.log*
+
+# Runtime state lives in ~/.hangar, never in the repo.
+# If a copy ever lands here, it is a mistake — do not commit it.
+.hangar/
+/state.json
+/agents.json
+!src/main/defaults/agents.json
+
+.hangar-worktrees/
+scratch/
+.env*
+*.bundle
+

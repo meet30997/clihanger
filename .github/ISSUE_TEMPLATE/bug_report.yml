@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report a reproducible problem in CliHanger
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue! Please check [docs/troubleshooting.md](https://github.com/meet30997/clihanger/blob/main/docs/troubleshooting.md) first.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Open CliHanger
+        2. Create a session with 'claude'
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: input
+    id: macos_version
+    attributes:
+      label: macOS Version & Architecture
+      placeholder: "e.g. macOS 15.0 (Apple Silicon M2 / Intel x86_64)"
+    validations:
+      required: true
+
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js & tmux Version
+      placeholder: "e.g. Node v22.12.0, tmux 3.4"
+    validations:
+      required: true
+
+  - type: input
+    id: agent_version
+    attributes:
+      label: Agent CLI & Version
+      placeholder: "e.g. Claude Code 0.2.29, Codex 0.150.0"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and Console Output
+      description: Copy output from the terminal where you launched `npm start` or any error popups.
+      render: shell

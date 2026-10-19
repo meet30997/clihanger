@@ -1,0 +1,39 @@
+name: Feature Request
+description: Suggest an idea or enhancement for CliHanger
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing a feature, please review our [Non-Goals in CONTRIBUTING.md](https://github.com/meet30997/clihanger/blob/main/CONTRIBUTING.md#2-non-goals-scope-boundary). CliHanger is intentionally focused on session routing and ports, not on becoming a full terminal replacement.
+
+  - type: checkboxes
+    id: scope_check
+    attributes:
+      label: Scope Check
+      options:
+        - label: I have reviewed the Non-Goals list and confirmed this proposal is aligned with CliHanger's core mission.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this solve, or what workflow does this enable?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: A clear description of what you want to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you have considered.

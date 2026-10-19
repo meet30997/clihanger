@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <link rel="stylesheet" href="../../node_modules/@fontsource-variable/inter/index.css" />
+  <link rel="stylesheet" href="../../node_modules/@fontsource-variable/jetbrains-mono/index.css" />
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="style.css" />
+  <title>CliHanger</title>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar" aria-label="Workspace">
+      <header id="sidebar-head" aria-label="CliHanger window"></header>
+      <div class="sidebar-scroll">
+        <button id="sidebar-ports" class="nav-row" aria-pressed="false">
+          <span class="icon-slot" aria-hidden="true"></span>
+          <span class="nav-label">Listening Ports</span>
+          <span id="sidebar-ports-count">—</span>
+        </button>
+        <section id="attention" aria-label="Waiting for you">
+          <div class="section-heading"><span>Waiting for you</span><span id="attention-count" aria-live="polite">0</span></div>
+          <div id="attention-list"></div>
+        </section>
+        <nav id="tree" aria-label="Projects and sessions"></nav>
+      </div>
+      <footer id="sidebar-footer">
+        <button id="add-project" class="icon-button" title="Add project (⌘O)" aria-label="Add project"></button>
+        <button id="sidebar-search" class="icon-button" title="Find a session (⌘P)" aria-label="Find a session (⌘P)"><span class="icon-slot" aria-hidden="true"></span></button>
+        <span id="running-count">0 running</span>
+      </footer>
+    </aside>
+    <div id="sidebar-resizer" role="separator" tabindex="0" aria-label="Sidebar width"
+         aria-orientation="vertical" aria-valuemin="220" aria-valuemax="600"
+         aria-valuenow="236" title="Drag to resize; arrow keys to adjust; double-click to reset"></div>
+
+    <main id="main">
+      <div id="topbar">
+        <button id="sidebar-collapse" class="icon-button" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
+        <button id="sidebar-expand" class="icon-button" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
+        <div id="topbar-left">
+          <div id="session-context">
+            <div id="session-title-row">
+              <span id="current-title" tabindex="0">No session selected</span>
+            </div>
+            <span id="current-subtitle" tabindex="0">Choose a project and start a terminal or agent</span>
+          </div>
+        </div>
+        <div id="topbar-right">
+          <span id="current-status" class="hidden" tabindex="0"></span>
+          <button id="topbar-rename" class="btn-sm hidden" title="Rename selected session">Rename</button>
+          <button id="topbar-handoff" class="btn-sm hidden" title="Copy session context handoff" aria-label="Copy handoff">
+            <span class="btn-icon" aria-hidden="true"></span>
+
+          </button>
+          <button id="inspector-toggle" class="icon-button" title="Toggle inspector" aria-label="Toggle inspector" aria-expanded="true"></button>
+        </div>
+        <div id="ports-toolbar" hidden>
+          <div class="segmented" role="group" aria-label="Port grouping">
+            <button id="ports-group-session" aria-pressed="true">By Session</button>
+            <button id="ports-group-all" aria-pressed="false">All</button>
+          </div>
+          <label class="ports-search"><span class="icon-slot" aria-hidden="true"></span><input id="ports-filter" type="search" placeholder="Search" aria-label="Search ports" /></label>
+          <button id="ports-refresh" class="icon-button" title="Check again" aria-label="Check ports again"></button>
+        </div>
+      </div>
+      <!-- Below the topbar, never above it: the traffic lights are positioned in
+           window coordinates and would land on top of a banner in the first row. -->
+      <div id="no-tmux-banner" hidden role="alert">
+        <span class="banner-icon"></span>
+        <span>tmux ≥ 3.2 is not installed or not in PATH. CliHanger requires tmux (<code>brew install tmux</code>) to manage sessions.</span>
+      </div>
+      <!-- Center content and inspector share the space below the toolbar. -->
+      <div id="workspace">
+      <div id="terminals">
+        <div id="session-opening" class="hidden" role="status" aria-live="polite"></div>
+        <div id="empty" class="hidden">
+          <div class="welcome-layout">
+          <div class="empty-card">
+            <img class="welcome-mark" src="app-icon.png" width="112" height="48" alt="" />
+            <h1 class="empty-title">A home for your CLI work.</h1>
+            <p class="empty-desc">Keep your terminals and coding agents together, organized by project.</p>
+            <button id="empty-add-project" class="btn-primary">Choose Project Folder…</button>
+          </div>
+          <aside id="welcome-ready" aria-label="Workspace setup">
+            <h2>Configured on this Mac</h2>
+            <div id="ready-agents" class="ready-card"></div>
+            <div class="ready-card"><div class="ready-row"><span class="icon-slot" data-icon="terminal"></span><span>tmux<small>Runs your sessions in the background</small></span><span id="ready-tmux"></span></div></div>
+            <p class="ready-hint">Configured agents may still need installation or sign-in.</p>
+            <p class="ready-footnote">Using another agent CLI? Add it in <code>~/.hangar/agents.json</code> and it shows up here.</p>
+          </aside>
+          </div>
+        </div>
+        <section id="stopped" class="hidden" aria-label="Stopped session">
+          <div id="stopped-agent-icon" aria-hidden="true"></div>
+          <div><h1 id="stopped-title"></h1><p class="stopped-subtitle">Stopped. Your saved context is ready when you are.</p></div>
+          <div class="stopped-note"><p id="stopped-note-text"></p><button id="stopped-edit-note" class="text-button">Edit Note</button></div>
+          <div class="stopped-actions"><button id="stopped-resume" class="btn-primary">Resume Conversation</button><button id="stopped-fresh" class="btn-secondary">Start New Conversation</button></div>
+          <p id="stopped-explanation" class="stopped-explanation"></p>
+          <div class="stopped-links"><button id="stopped-handoff" class="text-button">Copy Handoff…</button></div>
+        </section>
+
+        <!-- Terminal In-Pane Search Bar (⌘F) -->
+        <div id="term-search" hidden role="search" aria-label="Find in terminal">
+          <input id="term-search-input" type="text" placeholder="Find in terminal…" autocomplete="off" aria-label="Find" />
+          <span id="term-search-count"></span>
+          <button id="term-search-prev" class="search-btn" title="Previous match (⇧↵)" aria-label="Previous match">↑</button>
+          <button id="term-search-next" class="search-btn" title="Next match (↵)" aria-label="Next match">↓</button>
+          <button id="term-search-close" class="search-btn" title="Close (Esc)" aria-label="Close find bar">✕</button>
+        </div>
+
+        <!-- Copy Mode / Scroll Indicator Badge -->
+        <div id="copy-mode-badge" hidden role="status" aria-live="polite">
+          <span id="copy-mode-dot" aria-hidden="true"></span>
+          <span id="copy-mode-text">Scrolled up</span>
+          <button id="copy-mode-exit" title="Exit copy mode and jump to bottom (q)">Jump to bottom</button>
+        </div>
+      </div>
+      <section id="ports" class="hidden" aria-label="Listening ports">
+        <div id="ports-cols"><span>Port</span><span>Process</span><span>PID</span><span>Address</span></div>
+        <div id="ports-scan-message" hidden role="status"></div>
+        <div id="ports-body" role="list" aria-label="Listening processes"></div>
+        <footer id="ports-footer"></footer>
+      </section>
+      <aside id="inspector" aria-label="Inspector">
+        <div id="session-inspector">
+          <section class="inspector-section">
+            <h2>Session</h2>
+            <dl id="inspector-session-details"></dl>
+            <button id="inspector-rename" class="text-button">Rename Session…</button>
+          </section>
+          <section class="inspector-section" id="inspector-note-section">
+            <h2>Note</h2>
+            <p id="inspector-note"></p>
+            <div id="breadcrumb-pill" role="button" tabindex="0" title="Edit task note"><span id="breadcrumb-icon" class="icon-slot" aria-hidden="true"></span><span id="breadcrumb-text">Add Note</span></div>
+          </section>
+          <section class="inspector-section" id="inspector-observation">
+            <h2>Observation</h2><p id="inspector-reason"></p>
+            <pre id="inspector-excerpt" hidden></pre>
+            <button id="inspector-snooze" class="text-button" hidden>Snooze Attention</button>
+          </section>
+          <section class="inspector-section" id="inspector-ports-section">
+            <h2 id="inspector-ports-heading">Ports from this session</h2>
+            <div id="inspector-ports"></div>
+            <button id="inspector-all-ports" class="text-button">All listening ports…</button>
+          </section>
+          <section class="inspector-section" id="inspector-conversation" hidden>
+            <h2 id="inspector-conversation-heading">Conversation</h2>
+            <p id="inspector-conversation-title" hidden></p>
+            <p id="inspector-conversation-id"></p>
+            <p id="inspector-conversation-hint" class="conversation-hint" hidden></p>
+            <button id="inspector-link" class="text-button">Change Conversation…</button>
+          </section>
+          <button id="next-waiting" hidden><span class="icon-slot" aria-hidden="true"></span><span><small>Next waiting</small><strong id="next-waiting-title"></strong></span><kbd>⇧⌘J</kbd></button>
+        </div>
+        <div id="port-inspector" hidden></div>
+        <p id="inspector-empty" class="hidden">Select a session to see its details, note, and listening ports.</p>
+      </aside>
+      </div>
+    </main>
+  </div>
+
+  <!-- Quick Switcher -->
+  <div id="switcher" hidden role="dialog" aria-modal="true" aria-label="Quick Switcher">
+    <div id="switcher-box">
+      <div id="switcher-input-wrap">
+        <span id="switcher-search-icon" class="icon-slot" aria-hidden="true"></span>
+        <input id="switcher-input" placeholder="Jump to session or project (⌘P)…" autocomplete="off" aria-label="Search sessions" />
+      </div>
+      <div id="switcher-results" role="listbox"></div>
+      <div id="switcher-footer">
+        <span class="sw-hint"><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+        <span class="sw-hint"><kbd>↵</kbd> Select</span>
+        <span class="sw-hint"><kbd>esc</kbd> Dismiss</span>
+        <button id="switcher-context" class="btn-sm" aria-label="Selected session details">Details</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic In-App Modal (Confirmation / Branch Input) -->
+  <div id="modal" hidden role="dialog" aria-modal="true">
+    <div id="modal-box">
+      <div id="modal-title"></div>
+      <div id="modal-body"></div>
+      <div id="modal-actions">
+        <button id="modal-cancel" class="btn-secondary">Cancel</button>
+        <button id="modal-confirm" class="btn-primary">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preset Preview / Launch Modal (F3) -->
+  <div id="preset-modal" hidden role="dialog" aria-modal="true" aria-label="Preset Preview">
+    <div id="preset-modal-box">
+      <div class="preset-modal-header">
+        <div>
+          <div id="preset-modal-title"></div>
+          <div id="preset-modal-subtitle"></div>
+        </div>
+        <span id="preset-modal-source" class="preset-source-badge"></span>
+      </div>
+      <div id="preset-modal-errors" class="preset-errors-banner hidden"></div>
+      <div id="preset-modal-entries" class="preset-entries-list"></div>
+      <div id="preset-modal-actions">
+        <button id="preset-modal-cancel" class="btn-secondary">Close</button>
+        <button id="preset-modal-retry" class="btn-secondary hidden">Retry Failed</button>
+        <button id="preset-modal-launch" class="btn-primary">Launch Preset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Handoff Modal (F5) -->
+  <div id="handoff-modal" hidden role="dialog" aria-modal="true" aria-label="Session Context Handoff">
+    <div id="handoff-modal-box">
+      <div class="handoff-modal-header">
+        <div>
+          <div id="handoff-modal-title">Session Context Handoff</div>
+          <div id="handoff-modal-subtitle">Review, edit or redact before copying</div>
+        </div>
+        <span id="handoff-session-badge" class="handoff-badge"></span>
+      </div>
+      <div class="handoff-options">
+        <label class="handoff-checkbox-label">
+          <input type="checkbox" id="handoff-include-scrollback" checked />
+          <span>Include recent terminal output (<span id="handoff-line-count">80</span> lines)</span>
+        </label>
+        <span id="handoff-status-indicator" class="handoff-status-text"></span>
+      </div>
+      <div class="handoff-editor-wrap">
+        <textarea id="handoff-text" spellcheck="false" placeholder="Generating handoff context…"></textarea>
+      </div>
+      <div id="handoff-modal-actions">
+        <span id="handoff-info" class="handoff-info-text"></span>
+        <div class="handoff-button-group">
+          <button id="handoff-modal-cancel" class="btn-secondary">Cancel</button>
+          <button id="handoff-modal-copy" class="btn-primary">Copy to Clipboard</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context Menu for Sidebar Sessions -->
+  <div id="context-menu" hidden>
+    <div class="ctx-item" id="ctx-note">Edit Task Note…</div>
+    <div class="ctx-item" id="ctx-conv">Link Conversation ID (Advanced)…</div>
+    <div class="ctx-item" id="ctx-snooze">Snooze Attention</div>
+    <div class="ctx-item" id="ctx-handoff">Copy Handoff…</div>
+    <div class="ctx-item" id="ctx-rename">Rename Session</div>
+    <div class="ctx-item" id="ctx-kill">Close Session</div>
+  </div>
+
+  <!-- Status Explanation Inspection Card (F4) -->
+  <div id="status-popover" class="hidden" role="tooltip" aria-hidden="true">
+    <div class="popover-header">
+      <span id="popover-dot" class="status-dot"></span>
+      <span id="popover-title" class="popover-title"></span>
+      <span id="popover-time" class="popover-time"></span>
+    </div>
+    <div id="popover-reason" class="popover-reason"></div>
+    <pre id="popover-excerpt" class="popover-excerpt hidden"></pre>
+    <div class="popover-footer">
+      <span id="popover-source" class="popover-source"></span>
+      <button id="popover-snooze" class="btn-sm hidden">Snooze</button>
+    </div>
+  </div>
+
+  <!-- Session Task Note / Breadcrumb Editor (F1) -->
+  <div id="identity-detail" hidden role="tooltip"></div>
+
+  <div id="breadcrumb-editor" class="hidden" role="dialog" aria-modal="true" aria-label="Task Note Editor">
+    <textarea id="breadcrumb-input" rows="2" maxlength="500" placeholder="What are you working on? Next steps…"></textarea>
+    <div class="breadcrumb-editor-actions">
+      <span id="breadcrumb-counter">0/500</span>
+      <div class="breadcrumb-editor-buttons">
+        <button id="breadcrumb-cancel" class="btn-sm">Cancel</button>
+        <button id="breadcrumb-save" class="btn-sm btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" aria-live="polite"></div>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
