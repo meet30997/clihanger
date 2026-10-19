@@ -35,7 +35,7 @@ PRs introducing items from this non-goals list will be closed respectfully.
 
 ### Prerequisites
 - macOS (Apple Silicon or Intel)
-- Node.js LTS, v20 or newer (tested on 22 and 24; avoid odd-numbered releases, which lag on native prebuilds)
+- Node.js 22.12 or newer, LTS recommended (tested on 22 and 24; avoid odd-numbered releases, which lag on native prebuilds)
 - Xcode Command Line Tools (`xcode-select --install`)
 - tmux ≥ 3.2 (`brew install tmux`)
 
