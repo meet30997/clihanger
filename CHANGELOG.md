@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] — 2026-10-20
+
+### Changed
+- **Status explanations open on request:** The status card for a session now opens on click, Enter or Space instead of on hover, and closes on a second click.
+- **No hover tooltips:** Removed hover tooltips across the sidebar, top bar and inspector. Full session context is still exposed to assistive technology through `aria-label`.
+- **Contrast:** Darker secondary text, warning, success and status-dot colours; white text on blue selection fills (launcher, context menu, search matches); terminal text from agent CLIs is raised to WCAG AA contrast (`minimumContrastRatio: 4.5`).
+- **Lighter popovers and modals:** Softer shadows with a hairline edge and lighter backdrops, matching macOS.
+- **Terminal selection:** Selected text is now black on the light Highlight colour.
+
 ## [0.1.0] — 2026-10-19
 
 ### Added

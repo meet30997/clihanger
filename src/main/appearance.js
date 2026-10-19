@@ -3,7 +3,7 @@
 const FALLBACK = Object.freeze({
   effectiveAppearance: 'light',
   selectionBackground: '#b3d7ff',
-  selectionForeground: '#ffffff',
+  selectionForeground: '#000000',
   selectionInactiveBackground: '#dcdce0',
 });
 

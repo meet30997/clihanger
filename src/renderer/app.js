@@ -3,7 +3,7 @@
 const DEFAULT_APPEARANCE = {
   effectiveAppearance: 'light',
   selectionBackground: '#b3d7ff',
-  selectionForeground: '#ffffff',
+  selectionForeground: '#000000',
   selectionInactiveBackground: '#dcdce0',
 };
 
@@ -67,8 +67,8 @@ function sessionContext(session) {
     session.note].filter(Boolean).join('\n');
 }
 
-// Native title tooltips do not appear on keyboard focus. Provide the same full
-// text to sighted keyboard users and assistive technology without moving focus.
+// Full context is exposed to assistive technology through aria-label, and to
+// sighted users only on request (the switcher's Details button), never on hover.
 let identityAnchor = null;
 function setFullContext(el, text) {
   el.dataset.fullContext = text;
@@ -98,20 +98,6 @@ function showIdentityDetail(el) {
   detail.style.top = `${Math.max(8, below + detail.offsetHeight <= window.innerHeight - 8
     ? below : rect.top - detail.offsetHeight - 6)}px`;
 }
-function contextTarget(target) {
-  return target instanceof Element ? target.closest('[data-full-context]') : null;
-}
-document.addEventListener('mouseover', (e) => {
-  const target = contextTarget(e.target);
-  if (target && target !== contextTarget(e.relatedTarget)) showIdentityDetail(target);
-});
-document.addEventListener('mouseout', (e) => {
-  if (identityAnchor && !identityAnchor.contains(e.relatedTarget)) hideIdentityDetail();
-});
-document.addEventListener('focusin', (e) => {
-  const target = contextTarget(e.target);
-  if (target) showIdentityDetail(target);
-});
 document.addEventListener('focusout', hideIdentityDetail);
 document.addEventListener('pointerdown', hideIdentityDetail);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideIdentityDetail(); });
@@ -663,7 +649,7 @@ window.addEventListener('click', (event) => {
   if (!inBreadcrumb) closeBreadcrumbEditor();
 
   const inPopover = event.target instanceof Element
-    && (event.target.closest('#status-popover') || event.target.closest('.status-dot'));
+    && event.target.closest('#status-popover, .status-dot, #current-status');
   if (!inPopover) hideStatusPopover();
 });
 
@@ -925,7 +911,6 @@ $('#breadcrumb-editor').addEventListener('keydown', (e) => {
 
 /* ---------- Status Explanation Popover (F4) ---------- */
 
-let popoverTimeout = null;
 let popoverRequest = 0;
 const statusPopover = $('#status-popover');
 
@@ -1008,45 +993,35 @@ function showStatusPopover(dotEl) {
 
 function hideStatusPopover() {
   popoverRequest++;
-  clearTimeout(popoverTimeout);
   if (statusPopover) {
     statusPopover.classList.add('hidden');
     statusPopover.setAttribute('aria-hidden', 'true');
   }
 }
 
-if (statusPopover) {
-  statusPopover.addEventListener('mouseenter', () => clearTimeout(popoverTimeout));
-  statusPopover.addEventListener('mouseleave', hideStatusPopover);
+// The explanation card opens on request (click, Enter or Space), not on hover.
+function toggleStatusPopover(dotEl) {
+  const open = !statusPopover.classList.contains('hidden');
+  if (open && statusPopover.dataset.sessionId === dotEl.getAttribute('data-session-id')) {
+    hideStatusPopover();
+    return;
+  }
+  statusPopover.dataset.sessionId = dotEl.getAttribute('data-session-id');
+  showStatusPopover(dotEl);
 }
 
-$('#tree')?.addEventListener('mouseover', (e) => {
+$('#tree')?.addEventListener('click', (e) => {
   const dot = e.target.closest('.status-dot');
-  if (dot) {
-    clearTimeout(popoverTimeout);
-    popoverTimeout = setTimeout(() => showStatusPopover(dot), 300);
-  }
+  if (dot) toggleStatusPopover(dot);
 });
 
-$('#tree')?.addEventListener('mouseout', (e) => {
-  const dot = e.target.closest('.status-dot');
-  if (dot) {
-    clearTimeout(popoverTimeout);
-    popoverTimeout = setTimeout(hideStatusPopover, 200);
+$('#tree')?.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('status-dot')) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleStatusPopover(e.target);
   }
-});
-
-$('#tree')?.addEventListener('focusin', (e) => {
-  if (e.target.classList.contains('status-dot')) {
-    showStatusPopover(e.target);
-  }
-});
-
-$('#tree')?.addEventListener('focusout', (e) => {
-  if (e.target.classList.contains('status-dot')) {
-    hideStatusPopover();
-  }
-});
+}, { capture: true });
 
 /* ---------- Terminals & WebLinks ---------- */
 
@@ -1188,6 +1163,10 @@ function getTerm(sessionId) {
     macOptionIsMeta: getMacOptionIsMeta(),
     macOptionClickForcesSelection: true,
     screenReaderMode: true,   // VoiceOver accessibility support
+    // Agent CLIs paint truecolor picked for dark backgrounds (pale yellow-green,
+    // light blue, light grey), which the light palette above cannot reach.
+    // xterm nudges any cell below WCAG AA contrast until it passes.
+    minimumContrastRatio: 4.5,
     theme: {
       ...terminalTheme(),
       selectionBackground: appearance.selectionBackground,
@@ -1421,7 +1400,6 @@ function updateStatusDot(sessionId, status, snoozed = false) {
   if (dot) {
     dot.className = 'status-dot status-' + status + (snoozed ? ' snoozed' : '');
     const readableStatus = status.replace('_', ' ') + (snoozed ? ' (snoozed)' : '');
-    dot.title = readableStatus;
     dot.setAttribute('aria-label', `Status: ${readableStatus}`);
     dot.setAttribute('data-session-id', sessionId);
   }
@@ -1457,7 +1435,6 @@ function refreshWaitingDurations() {
     const session = state.sessions.find((row) => row.id === id);
     const waiting = !session?.pending && statuses[id] === 'needs_input' && meta?.waitingSince;
     el.textContent = waiting ? formatDuration(Math.max(0, Math.floor((Date.now() - meta.waitingSince) / 1000))) : '';
-    el.title = waiting ? 'Observed waiting time' : '';
   });
 }
 setInterval(refreshWaitingDurations, 1000);
@@ -1604,7 +1581,7 @@ function refreshAttention() {
     const row = document.createElement('button');
     row.className = 'attention-row' + (!portsView && activeId === session.id ? ' active' : '');
     row.dataset.attentionSession = session.id;
-    row.title = sessionContext(session);
+    row.setAttribute('aria-label', sessionContext(session));
     const label = document.createElement('span');
     label.className = 'attention-label';
     label.textContent = sessionDisplayName(session);
@@ -1644,7 +1621,6 @@ function refreshWorkspaceChrome() {
   $('#sidebar-ports').classList.toggle('active', portsView);
   $('#sidebar-ports').setAttribute('aria-pressed', String(portsView));
   $('#sidebar-ports-count').textContent = portsError ? '?' : portsCheckedAt ? String(portRows.length) : '—';
-  $('#sidebar-ports-count').title = portsError ? 'Port scan unavailable' : 'Local TCP listeners';
   $('#running-count').textContent = `${state.sessions.filter((s) => !s.pending && s.tmuxName).length} running`;
   if (portsView) {
     $('#current-title').textContent = 'Listening Ports';
@@ -1689,7 +1665,6 @@ function refreshSessionInspector() {
   status.classList.toggle('needs_input', statuses[session.id] === 'needs_input' && !session.pending);
   status.textContent = observedStatus(session);
   status.dataset.sessionId = session.id;
-  status.title = 'Inspect the latest status observation';
   const details = $('#inspector-session-details'); details.replaceChildren();
   const agent = state.agents[session.agentId] || {};
   const project = state.projects.find((p) => p.id === session.projectId);
@@ -1738,7 +1713,6 @@ function refreshSessionInspector() {
     for (const row of rows) {
       const item = document.createElement('div'); item.className = 'inspector-port';
       const num = document.createElement('button'); num.className = 'text-button'; num.textContent = row.port;
-      num.title = `Open http://localhost:${row.port}`;
       num.onclick = () => window.hangar.openUrl(`http://localhost:${row.port}`).catch((err) => showError(err.message));
       const process = document.createElement('span'); process.className = 'port-process'; process.textContent = row.command;
       const pid = document.createElement('small'); pid.textContent = ` · ${row.pid}`; process.append(pid); process.title = `${row.command} · PID ${row.pid}`;
@@ -1822,10 +1796,12 @@ $('#stopped-resume').onclick = () => activeId && openStoppedSession(activeId);
 $('#stopped-fresh').onclick = () => activeId && showTerm(activeId, false);
 $('#stopped-edit-note').onclick = (event) => openBreadcrumbEditor(event.currentTarget);
 $('#stopped-handoff').onclick = () => activeId && openHandoffModal(activeId);
-$('#current-status').onmouseenter = (event) => showStatusPopover(event.currentTarget);
-$('#current-status').onfocus = (event) => showStatusPopover(event.currentTarget);
-$('#current-status').onmouseleave = hideStatusPopover;
-$('#current-status').onblur = hideStatusPopover;
+$('#current-status').onclick = (event) => toggleStatusPopover(event.currentTarget);
+$('#current-status').onkeydown = (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  toggleStatusPopover(event.currentTarget);
+};
 setInterval(() => { if (portsView) refreshWorkspaceChrome(); }, 1000);
 
 /* ---------- Rendering Tree & Affordances ---------- */
@@ -1867,7 +1843,6 @@ function render() {
     setFullContext(toggle, [g.project.name, g.project.path].filter(Boolean).join('\n'));
     if (g.project.id) {
       toggle.innerHTML = iconSvg('chevronDown', 'icon-sm project-chevron');
-      toggle.title = `${isCollapsed ? 'Expand' : 'Collapse'} ${g.project.name}`;
       toggle.setAttribute('aria-expanded', String(!isCollapsed));
       toggle.onclick = (e) => {
         e.stopPropagation();
@@ -2032,7 +2007,6 @@ function render() {
           pBtn.className = 'launcher-option launcher-preset';
           pBtn.dataset.sidebarFocus = `preset:${g.project.id}:${pName}`;
           const sessionCount = Array.isArray(pSessions) ? pSessions.length : 0;
-          pBtn.title = `Preview & launch preset "${pName}" (${sessionCount} sessions)`;
           pBtn.setAttribute('aria-label', `Preset ${pName}`);
 
           const pIcon = document.createElement('span');
@@ -2081,7 +2055,6 @@ function render() {
       const dot = document.createElement('span');
       dot.className = 'status-dot status-' + st + (isSnoozed ? ' snoozed' : '');
       const readableStatus = (lifecycleLabel(s) || st.replace('_', ' ')) + (isSnoozed ? ' (snoozed)' : '');
-      dot.title = readableStatus;
       dot.setAttribute('aria-label', `Status: ${readableStatus}`);
       dot.setAttribute('role', 'status');
       dot.setAttribute('data-session-id', s.id);
@@ -2374,7 +2347,7 @@ function renderPorts() {
         const span = document.createElement('span');
         span.className = cls;
         span.textContent = value;
-        span.title = String(value);
+        if (cls === 'cmd' || cls === 'address') span.title = String(value);
         row.append(span);
       }
       row.onclick = () => { selectedPortKey = portKey(r); renderPorts(); refreshSessionInspector(); };

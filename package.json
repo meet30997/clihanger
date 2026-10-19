@@ -1,6 +1,6 @@
 {
   "name": "clihanger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A macOS workspace for running Claude Code, Codex and other agent CLIs side by side, with attention routing and a ports panel.",
   "main": "src/main/main.js",
