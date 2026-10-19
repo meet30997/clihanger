@@ -5,6 +5,8 @@ One window for all your coding-agent CLIs. See which agent needs you, and which 
 [![CI](https://github.com/meet30997/clihanger/actions/workflows/ci.yml/badge.svg)](https://github.com/meet30997/clihanger/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+![CliHanger with Claude Code and Codex sessions grouped by project. Two agents wait for input in the "Waiting for you" queue, and Claude's finished diff is shown.](docs/images/workspace.png)
+
 ---
 
 ## Why CliHanger?
@@ -27,6 +29,10 @@ CliHanger solves both: it gives you a focused multi-agent sidebar with live stat
 - **Session Continuity:** Sessions survive window reloads and can be parked/resumed across application restarts without losing conversation context.
 - **Quick Switcher (⌘P):** Jump instantly to any project or session, with attention-seeking sessions prioritized at the top.
 - **Extensible Configuration:** Agents are defined as data in `~/.hangar/agents.json`. Adding a new agent CLI requires no code changes.
+
+| An agent stopped on an approval prompt | A dev server's port, traced to its session |
+|---|---|
+| ![Codex waiting on a command approval, with the matched prompt shown in the inspector](docs/images/approval.png) | ![A terminal session running a dev server, with port 3000 attributed to it and a Stop button](docs/images/port-attribution.png) |
 
 ---
 
