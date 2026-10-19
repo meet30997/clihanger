@@ -110,14 +110,20 @@ If a server daemonizes, detaches from its parent, or is reparented to `launchd` 
 
 ## 5. macOS Gatekeeper and Security
 
-### macOS says the app cannot be opened or is damaged
+### macOS says the app cannot be opened, or is damaged
 
-Unsigned or ad-hoc signed builds downloaded or moved to `/Applications` may be quarantined by macOS Gatekeeper:
+Release builds are ad-hoc signed but not notarized, so Gatekeeper blocks the first launch of a downloaded copy.
+
+- **macOS 15 or later:** try to open the app once, then go to **System Settings → Privacy & Security**, click **Open Anyway** next to the CliHanger message, and confirm. (Right-click → Open no longer bypasses this on macOS 15.)
+- **macOS 12–14:** right-click `CliHanger.app` in Finder, choose **Open**, then click **Open** in the dialog.
+
+Either way, you can clear the quarantine flag from Terminal instead:
 
 ```bash
-xattr -cr /Applications/CliHanger.app
+xattr -dr com.apple.quarantine /Applications/CliHanger.app
 ```
-Alternatively, right-click `CliHanger.app` in Finder, choose **Open**, and click **Open** in the confirmation dialog.
+
+Builds you make yourself with `npm run dist` or `npm run install-app` are never quarantined.
 
 ---
 

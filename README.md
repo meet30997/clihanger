@@ -50,11 +50,28 @@ You can customize commands or add any agent CLI (such as Aider) in `~/.hangar/ag
 
 ## Requirements
 
-- **macOS:** 12 or later. Tested on Apple Silicon; Intel builds are untested.
+- **macOS:** 12 or later. Tested on Apple Silicon; Intel is untested and has no prebuilt download.
 - **tmux ≥ 3.2:** `brew install tmux`
+- At least one coding agent CLI installed and authenticated
+
+Building from source also needs:
+
 - **Node.js:** 22.12 or newer, LTS recommended (tested on 22 and 24; `node -v`). Electron 43's installer requires it.
 - **Xcode Command Line Tools:** `xcode-select --install`
-- At least one coding agent CLI installed and authenticated
+
+---
+
+## Download (Apple Silicon)
+
+1. Download **CliHanger-0.1.0-arm64.zip** from the [latest release](https://github.com/meet30997/clihanger/releases/latest) and unzip it.
+2. Move `CliHanger.app` to `/Applications`.
+3. Open it. The build is ad-hoc signed, not notarized, so macOS blocks the first launch:
+   - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll to the message about CliHanger, click **Open Anyway**, and confirm.
+   - **macOS 12–14:** right-click `CliHanger.app` in Finder, choose **Open**, then **Open** again.
+
+   Or clear the quarantine flag in Terminal instead: `xattr -dr com.apple.quarantine /Applications/CliHanger.app`
+
+The release notes list the SHA-256 checksum of the zip. You can compare it with `shasum -a 256 CliHanger-0.1.0-arm64.zip`.
 
 ---
 
