@@ -106,12 +106,13 @@ document.addEventListener('scroll', hideIdentityDetail, true);
 
 const TERMINAL_THEMES = {
   dark: {
-    background: '#1e1e20', foreground: '#e8e8e8', cursor: '#a3d8ff',
-    black: '#2e3436', red: '#cc0000', green: '#4e9a06', yellow: '#c4a000',
-    blue: '#3465a4', magenta: '#75507b', cyan: '#06989a', white: '#d3d7cf',
-    brightBlack: '#555753', brightRed: '#ef2929', brightGreen: '#8ae234',
-    brightYellow: '#fce94f', brightBlue: '#729fcf', brightMagenta: '#ad7fa8',
-    brightCyan: '#34e2e2', brightWhite: '#eeeeec',
+    // Every colour except black is >= 4.8:1 on the background.
+    background: '#1e1e1e', foreground: '#e8e8ea', cursor: '#8cc4ff',
+    black: '#3a3a3c', red: '#ff6b61', green: '#4fd17a', yellow: '#e5c07b',
+    blue: '#5aa9ff', magenta: '#d78bf0', cyan: '#4fd0d6', white: '#d6d6db',
+    brightBlack: '#8a8a90', brightRed: '#ff8a80', brightGreen: '#7ee59b',
+    brightYellow: '#ffd479', brightBlue: '#8cc4ff', brightMagenta: '#e5a8f7',
+    brightCyan: '#7ee4e8', brightWhite: '#ffffff',
   },
   light: {
     background: '#ffffff', foreground: '#1d1d1f', cursor: '#0066cc',
@@ -132,13 +133,13 @@ function terminalTheme() {
    macOS selected-text colours and broadcasts changes. */
 function applyAppearance(next) {
   if (!next) return;
-  appearance = { ...DEFAULT_APPEARANCE, ...next, effectiveAppearance: 'light' };
+  appearance = { ...DEFAULT_APPEARANCE, ...next };
   const root = document.documentElement.style;
   root.setProperty('--selection', appearance.selectionBackground);
   root.setProperty('--selection-text', appearance.selectionForeground);
   root.setProperty('--selection-inactive', appearance.selectionInactiveBackground);
 
-  document.documentElement.dataset.theme = 'light';
+  document.documentElement.dataset.theme = appearance.effectiveAppearance;
 
   if (typeof terms !== 'undefined') {
     for (const { term } of terms.values()) {
@@ -228,6 +229,7 @@ const ICONS = {
   folderPlus:   '<path d="M6.5 12.5h-3a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3L8 5h4.5a1 1 0 0 1 1 1v1"/><path d="M11.5 9v5M9 11.5h5"/>',
   chat:         '<path d="M3 4.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H6l-3 2.5v-9.5a1 1 0 0 1 1-1z"/>',
   check:        '<path d="M3.5 8.5l3 3 6-6"/>',
+  stop:         '<rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.5"/>',
 };
 
 function iconSvg(name, extraClass = '') {
@@ -1163,9 +1165,10 @@ function getTerm(sessionId) {
     macOptionIsMeta: getMacOptionIsMeta(),
     macOptionClickForcesSelection: true,
     screenReaderMode: true,   // VoiceOver accessibility support
-    // Agent CLIs paint truecolor picked for dark backgrounds (pale yellow-green,
-    // light blue, light grey), which the light palette above cannot reach.
-    // xterm nudges any cell below WCAG AA contrast until it passes.
+    // Agent CLIs paint truecolor picked for one background (usually dark: pale
+    // yellow-green, light blue, light grey) that the palettes above cannot reach.
+    // xterm nudges any cell below WCAG AA contrast until it passes, in either
+    // appearance.
     minimumContrastRatio: 4.5,
     theme: {
       ...terminalTheme(),
@@ -2350,9 +2353,20 @@ function renderPorts() {
         if (cls === 'cmd' || cls === 'address') span.title = String(value);
         row.append(span);
       }
+      // Every listener can be stopped from its row, so stopping never depends
+      // on the inspector being open or on the port being attributed.
+      const stop = document.createElement('button');
+      stop.className = 'port-stop';
+      stop.disabled = !!portsError;
+      stop.setAttribute('aria-label', `Stop ${r.command}, process ${r.pid}, port ${r.port}`);
+      stop.innerHTML = iconSvg('stop', 'icon-sm');
+      stop.onclick = (event) => { event.stopPropagation(); stopPortProcess(r); };
+      row.append(stop);
       row.onclick = () => { selectedPortKey = portKey(r); renderPorts(); refreshSessionInspector(); };
       row.onkeydown = (event) => {
+        if (event.target !== row) return;
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); row.click(); }
+        if ((event.key === 'Backspace' || event.key === 'Delete') && !portsError) { event.preventDefault(); stopPortProcess(r); }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault();
           const items = [...body.querySelectorAll('.port-row')];
@@ -3097,9 +3111,9 @@ function formatHandoffText(data, includeScrollback) {
   } else if (data.scrollbackStatus === 'empty' || !data.scrollback) {
     lines.push('', `*(Terminal scrollback is empty)*`);
   } else {
-    lines.push('', `#### Recent Terminal Output:`, '```text');
+    lines.push('', `#### Terminal Output:`, '```text');
     if (data.scrollbackTruncated) {
-      lines.push(`[... earlier output truncated to last ${data.scrollbackLines} lines / 20KB ...]`);
+      lines.push(`[... earlier output omitted; showing the last ${data.scrollbackLines} lines ...]`);
     }
     lines.push(data.scrollback);
     lines.push('```');
@@ -3148,7 +3162,7 @@ async function openHandoffModal(sessionId) {
   modal.hidden = false;
 
   try {
-    const data = await window.hangar.getSessionHandoff(sessionId, 80);
+    const data = await window.hangar.getSessionHandoff(sessionId);
     if (activeHandoffSessionId !== sessionId) return;
 
     currentHandoffRawData = data;
@@ -3171,9 +3185,7 @@ async function openHandoffModal(sessionId) {
         checkbox.checked = true;
         checkbox.disabled = false;
         if (indicatorEl) {
-          indicatorEl.textContent = data.scrollbackTruncated
-            ? 'Output truncated (line or 20KB limit)'
-            : `${data.scrollbackLines} lines captured`;
+          indicatorEl.textContent = `${data.scrollbackLines} lines captured (full scrollback)`;
         }
       }
     }

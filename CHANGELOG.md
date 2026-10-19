@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] — 2026-10-20
+
+### Added
+- **Dark mode:** The app now follows the macOS Light/Dark appearance live. The dark palette keeps all text at 4.5:1 contrast or better, and the terminal gets a dark ANSI palette tuned to the same standard.
+- **Stop any port from the list:** Every row in Listening Ports has its own Stop button (or press Delete on a focused row), whether or not the port belongs to a session, and whether or not the inspector is open.
+
+### Changed
+- **Handoff has no length limit:** Copy Handoff now includes the session's full terminal scrollback (up to tmux's 50,000-line history) instead of the last 80 lines / 20 KB. You can still review and redact it before copying.
+- **Screenshots:** README and social preview images now show dark mode.
+
 ## [0.1.1] — 2026-10-20
 
 ### Changed

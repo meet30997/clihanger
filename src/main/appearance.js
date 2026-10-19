@@ -14,7 +14,7 @@ function normalizeColor(value, fallback) {
 }
 
 function readAppearance(systemPreferences, nativeTheme) {
-  const effectiveAppearance = 'light';
+  const effectiveAppearance = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
 
   const readColor = (name, fallback) => {
     try { return normalizeColor(systemPreferences.getColor(name), fallback); } catch { return fallback; }

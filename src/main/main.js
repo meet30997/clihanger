@@ -208,7 +208,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     // Center native controls in the 52px toolbar.
     trafficLightPosition: { x: 20, y: 20 },
-    backgroundColor: currentAppearance.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e20',
+    backgroundColor: currentAppearance.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e1e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -257,7 +257,7 @@ function getStateWithTmux(source = sessions.fullState()) {
 function updateAppearance(next, shouldBroadcast) {
   currentAppearance = next;
   if (win && !win.isDestroyed()) {
-    win.setBackgroundColor(next.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e20');
+    win.setBackgroundColor(next.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e1e');
   }
   try {
     tmux.configureSelectionStyle(next.selectionBackground, next.selectionForeground);
@@ -480,8 +480,8 @@ function buildMenu() {
 }
 
 app.whenReady().then(async () => {
-  // The current reference is light-only; native dialogs must match the workspace.
-  nativeTheme.themeSource = 'light';
+  // Follow macOS; this also drives prefers-color-scheme in the renderer.
+  nativeTheme.themeSource = 'system';
   appearanceObserver = observeAppearance({
     systemPreferences,
     nativeTheme,

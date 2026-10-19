@@ -5,7 +5,7 @@ One window for all your coding-agent CLIs. See which agent needs you, and which 
 [![CI](https://github.com/meet30997/clihanger/actions/workflows/ci.yml/badge.svg)](https://github.com/meet30997/clihanger/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-![CliHanger with Claude Code and Codex sessions grouped by project. Two agents wait for input in the "Waiting for you" queue, and Claude's finished diff is shown.](docs/images/workspace.png)
+![CliHanger in dark mode with Claude Code and Codex sessions grouped by project. Codex waits for input in the "Waiting for you" queue, and Claude's finished diff is shown.](docs/images/workspace.png)
 
 ---
 
@@ -63,7 +63,7 @@ Building from source also needs:
 
 ## Download (Apple Silicon)
 
-1. Download **CliHanger-0.1.1-arm64.zip** from the [latest release](https://github.com/meet30997/clihanger/releases/latest) and unzip it.
+1. Download **CliHanger-0.2.0-arm64.zip** from the [latest release](https://github.com/meet30997/clihanger/releases/latest) and unzip it.
 2. Move `CliHanger.app` to `/Applications`.
 3. Open it. The build is ad-hoc signed, not notarized, so macOS blocks the first launch:
    - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll to the message about CliHanger, click **Open Anyway**, and confirm.
@@ -71,7 +71,7 @@ Building from source also needs:
 
    Or clear the quarantine flag in Terminal instead: `xattr -dr com.apple.quarantine /Applications/CliHanger.app`
 
-The release notes list the SHA-256 checksum of the zip. You can compare it with `shasum -a 256 CliHanger-0.1.1-arm64.zip`.
+The release notes list the SHA-256 checksum of the zip. You can compare it with `shasum -a 256 CliHanger-0.2.0-arm64.zip`.
 
 ---
 
@@ -141,7 +141,7 @@ CliHanger runs locally with standard user privileges. Here is exactly what it to
 
 To keep the application fast and reliable, the following features are explicitly out of scope:
 
-- **Themes & Styling Customization:** Uses a native macOS look and your system Highlight color. The UI is currently light-only.
+- **Themes & Styling Customization:** Uses a native macOS look and your system Highlight color. Light and dark follow the macOS appearance.
 - **Split Panes & Browser Tabs:** Terminal multiplexing belongs in your CLI or tmux; CliHanger provides single-pane focus.
 - **Settings UI:** Configuration is managed directly in `~/.hangar/agents.json`.
 - **Remote SSH & Cloud Sync:** CliHanger is designed specifically for local macOS workflows.

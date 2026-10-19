@@ -738,9 +738,9 @@ function formatHandoffMarkdown(data) {
   } else if (data.scrollbackStatus === 'empty' || !data.scrollback) {
     lines.push('', `*(Terminal scrollback is empty)*`);
   } else {
-    lines.push('', `#### Recent Terminal Output:`, '```text');
+    lines.push('', `#### Terminal Output:`, '```text');
     if (data.scrollbackTruncated) {
-      lines.push(`[... earlier output truncated to last ${data.scrollbackLines} lines / 20KB ...]`);
+      lines.push(`[... earlier output omitted; showing the last ${data.scrollbackLines} lines ...]`);
     }
     lines.push(data.scrollback);
     lines.push('```');
@@ -766,10 +766,13 @@ async function getHandoffData(sessionId, options = {}) {
   const statusDetails = status.getDetails(sessionId);
   const currentStatus = statusDetails?.status || (session.pending ? 'not started' : 'idle');
 
-  const maxLines = Math.min(Math.max(1, Math.floor(Number(options.lines) || 80)), 300);
+  // No cap by default: the whole tmux history (bounded only by history-limit).
+  // A caller may still ask for just the last N lines.
+  const maxLines = Number(options.lines) >= 1 ? Math.floor(Number(options.lines)) : null;
   let scrollback = null;
   let scrollbackStatus = 'parked';
   let scrollbackTruncated = false;
+  let capturedLineCount = 0;
   let scrollbackError = null;
 
   if (!session.pending && session.tmuxName) {
@@ -780,19 +783,16 @@ async function getHandoffData(sessionId, options = {}) {
         scrollbackStatus = 'error';
         scrollbackError = 'tmux session is not running';
       } else {
-        const rawCapture = await t.capturePane(session.tmuxName, maxLines + 1, true);
+        const rawCapture = maxLines === null
+          ? await t.captureFullScrollback(session.tmuxName, true)
+          : await t.capturePane(session.tmuxName, maxLines + 1, true);
         if (rawCapture && typeof rawCapture === 'string') {
           const clean = stripVTControlCharacters(rawCapture).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd();
           const capturedLines = clean.split('\n');
-          scrollbackTruncated = capturedLines.length > maxLines;
-          let text = capturedLines.slice(-maxLines).join('\n');
-          if (Buffer.byteLength(text, 'utf8') > 20480) {
-            const bytes = Buffer.from(text, 'utf8');
-            let offset = bytes.length - 20480;
-            while ((bytes[offset] & 0xc0) === 0x80) offset++;
-            text = bytes.subarray(offset).toString('utf8');
-            scrollbackTruncated = true;
-          }
+          scrollbackTruncated = maxLines !== null && capturedLines.length > maxLines;
+          const kept = scrollbackTruncated ? capturedLines.slice(-maxLines) : capturedLines;
+          capturedLineCount = kept.length;
+          const text = kept.join('\n');
           scrollback = text;
           scrollbackStatus = text.length > 0 ? 'captured' : 'empty';
         } else {
@@ -822,7 +822,7 @@ async function getHandoffData(sessionId, options = {}) {
     isParked: !!session.pending,
     captureTime: new Date().toISOString(),
     scrollback,
-    scrollbackLines: maxLines,
+    scrollbackLines: capturedLineCount,
     scrollbackTruncated,
     scrollbackStatus,
     scrollbackError,
