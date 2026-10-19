@@ -52,7 +52,7 @@ You can customize commands or add any agent CLI (such as Aider) in `~/.hangar/ag
 
 - **macOS:** 12 or later. Tested on Apple Silicon; Intel builds are untested.
 - **tmux ≥ 3.2:** `brew install tmux`
-- **Node.js:** v20 or v22 (`node -v`)
+- **Node.js:** an LTS release, v20 or newer (tested on 22 and 24; `node -v`)
 - **Xcode Command Line Tools:** `xcode-select --install`
 - At least one coding agent CLI installed and authenticated
 

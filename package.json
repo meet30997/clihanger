@@ -23,7 +23,7 @@
     "developer-tools"
   ],
   "engines": {
-    "node": ">=20 <23"
+    "node": ">=20"
   },
   "os": [
     "darwin"
