@@ -1168,3 +1168,10 @@ body.first-run #welcome-ready { display: flex; flex-direction: column; gap: 14px
   font: inherit;
 }
 #modal-body select option { padding: 6px; }
+
+/* A Finder drag over the live terminal: the paths will be typed here. */
+.term-wrap.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 4px;
+}

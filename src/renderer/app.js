@@ -434,6 +434,9 @@ const ctxMenu = $('#context-menu');
 // system menu on screen. Propagation is left alone so the sidebar's own
 // oncontextmenu can still open the app menu below.
 document.addEventListener('contextmenu', (event) => event.preventDefault(), { capture: true });
+// A file dropped anywhere but a terminal would otherwise navigate the window to it.
+document.addEventListener('dragover', (event) => event.preventDefault());
+document.addEventListener('drop', (event) => event.preventDefault());
 
 function showContextMenu(x, y, sessionId) {
   hideIdentityDetail();
@@ -501,7 +504,7 @@ function closeTermSearch() {
 }
 
 async function runTermSearch(query) {
-  termSearchQuery = (query || '').trim();
+  termSearchQuery = (query || '').trim() ? query : '';
   termSearchMatchCount = 0;
   currentTermSearchIdx = -1;
   const countEl = $('#term-search-count');
@@ -1139,6 +1142,97 @@ function forwardWheelToTmux(sessionId, term, event) {
   return false;
 }
 
+// Command-Left, -Right and -Delete reach tmux as its User0–2 keys, which tmux
+// turns into Control-A, -E and -U at a shell, or Home, End and Control-U when a
+// full-screen program owns the pane (KEY_ROUTING in tmux.js, ADR-072/073). xterm itself drops Command chords. Option
+// chords need nothing here: xterm's own M-Left/M-Right are routed the same way.
+const COMMAND_EDITING_KEYS = { ArrowLeft: '\x1b[9001~', ArrowRight: '\x1b[9002~', Backspace: '\x1b[9003~' };
+
+function commandEditingSequence(event) {
+  if (event.isComposing || !event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return null;
+  return COMMAND_EDITING_KEYS[event.key] || null;
+}
+
+// Backslash-quote every ASCII character zsh or bash would interpret, as
+// Terminal.app does for a Finder drop; non-ASCII text is literal to both shells.
+// Control characters have no quoting that survives every shell and line editor
+// (a backslash-newline is a line continuation), so a caller must reject them.
+const UNQUOTABLE_PATH = /[\x00-\x1f\x7f-\x9f]/;
+
+function shellEscapePath(filePath) {
+  return filePath.replace(/[^\w\-.,:+@%/=\u00a0-\uffff]/g, '\\$&');
+}
+
+/** Resolve dropped Files to shell words, or say why the drop types nothing. */
+function droppedPathText(files) {
+  const paths = [];
+  let notOnDisk = 0;
+  const unquotable = [];
+  for (const file of files) {
+    let filePath = '';
+    try { filePath = window.hangar.pathForFile(file); } catch {}
+    if (!filePath) notOnDisk += 1;
+    else if (UNQUOTABLE_PATH.test(filePath)) unquotable.push(file.name);
+    else paths.push(filePath);
+  }
+  // All or nothing: a command missing one of the dropped arguments is worse
+  // than no insertion at all.
+  if (unquotable.length) {
+    // JSON quoting shows the offending character instead of breaking the message.
+    return { error: `Nothing was inserted: ${unquotable.map((name) => JSON.stringify(name)).join(', ')} has a line break or control character in its name.` };
+  }
+  if (notOnDisk) {
+    return { error: notOnDisk === files.length
+      ? 'Nothing was inserted: only files and folders from disk can be dropped.'
+      : `Nothing was inserted: ${notOnDisk} of ${files.length} dropped items are not files on disk.` };
+  }
+  return { text: paths.map(shellEscapePath).join(' ') + ' ' };
+}
+
+/**
+ * Option-click positions the shell cursor, as in Terminal.app (ADR-073). The
+ * signed distance is counted in characters, not cells, so a wide CJK or emoji
+ * cell is one arrow press. Main sends the arrows only if tmux confirms the
+ * pane is a shell line on the main screen; anything else sends nothing.
+ */
+function optionClickMove(sessionId, term, event) {
+  const screen = term.element?.querySelector('.xterm-screen');
+  const rect = screen?.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return;
+  const buffer = term.buffer.active;
+  const row = Math.floor((event.clientY - rect.top) / rect.height * term.rows);
+  let col = Math.round((event.clientX - rect.left) / rect.width * term.cols);
+  if (row < 0 || row >= term.rows || col < 0) return;
+  const fromRow = buffer.cursorY;
+  const fromCol = buffer.cursorX;
+  // Past the end of the text means the end of the text, never trailing blanks.
+  const line = buffer.getLine(buffer.viewportY + row);
+  if (!line) return;
+  let end = 0;
+  for (let x = term.cols - 1; x >= 0; x -= 1) {
+    const chars = line.getCell(x)?.getChars();
+    if (chars && chars !== ' ') { end = x + 1; break; }
+  }
+  col = Math.min(col, row === fromRow ? Math.max(end, fromCol) : end);
+
+  const forward = row > fromRow || (row === fromRow && col > fromCol);
+  let [x, y] = forward ? [fromCol, fromRow] : [col, row];
+  const [stopX, stopY] = forward ? [col, row] : [fromCol, fromRow];
+  let chars = 0;
+  while (y < stopY || (y === stopY && x < stopX)) {
+    if ((buffer.getLine(buffer.viewportY + y)?.getCell(x)?.getWidth() ?? 1) > 0) chars += 1;
+    x += 1;
+    if (x >= term.cols) { x = 0; y += 1; }
+  }
+  if (chars === 0) return;
+  window.hangar.moveTerminalCursor(sessionId, fromCol, fromRow, row, forward ? chars : -chars)
+    .catch((err) => showError(`Could not move the cursor: ${err.message}`));
+}
+
+function applyScreenReader() {
+  for (const { term } of terms.values()) term.options.screenReaderMode = !!state.screenReader;
+}
+
 function getTerm(sessionId) {
   if (terms.has(sessionId)) return terms.get(sessionId);
 
@@ -1164,7 +1258,13 @@ function getTerm(sessionId) {
     scrollback: 0,            // tmux owns scrollback; don't duplicate it
     macOptionIsMeta: getMacOptionIsMeta(),
     macOptionClickForcesSelection: true,
-    screenReaderMode: true,   // VoiceOver accessibility support
+    // xterm's own Option-click mover reads its wrap markers, which tmux never
+    // sets, and sends Up/Down for other rows: in a shell that recalls history.
+    // optionClickMove() replaces it.
+    altClickMovesCursor: false,
+    // Only while VoiceOver (or another AT) runs: in this mode xterm ignores
+    // insertText input, which is how the emoji picker and Character Viewer type.
+    screenReaderMode: !!state.screenReader,
     // Agent CLIs paint truecolor picked for one background (usually dark: pale
     // yellow-green, light blue, light grey) that the palettes above cannot reach.
     // xterm nudges any cell below WCAG AA contrast until it passes, in either
@@ -1180,6 +1280,12 @@ function getTerm(sessionId) {
 
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+
+  // xterm defaults to Unicode 6 widths, where most emoji are one cell, and
+  // counts every part of a skin-tone or ZWJ sequence. tmux 3.7 draws each as
+  // one two-cell cluster, so the cursor drifted after them (ADR-073).
+  term.loadAddon(new UnicodeGraphemesAddon.UnicodeGraphemesAddon());
+  term.unicode.activeVersion = '15-graphemes';
 
   // Clickable links via url:open IPC (Finding 1.4)
   if (typeof WebLinksAddon !== 'undefined' && WebLinksAddon.WebLinksAddon) {
@@ -1198,6 +1304,12 @@ function getTerm(sessionId) {
   // xterm 6 collapses Shift/Ctrl-Enter to CR. Agent editors need Shift-Enter;
   // regular shells need a bracketed-paste newline to avoid execution.
   term.attachCustomKeyEventHandler((event) => {
+    const editing = commandEditingSequence(event);
+    if (editing) {
+      if (event.type === 'keydown') term.input(editing, true);
+      event.preventDefault();
+      return false;
+    }
     if (event.key !== 'Enter' || event.isComposing || event.altKey || event.metaKey
       || (!event.shiftKey && !event.ctrlKey)) return true;
     if (event.type === 'keydown') {
@@ -1230,6 +1342,46 @@ function getTerm(sessionId) {
       }, 75);
     }
   });
+  // Dropping files types their shell-escaped paths, as Terminal.app does: one
+  // paste, a trailing space, no Return. A paste rather than keystrokes keeps
+  // bracketed paste, which is how agent CLIs recognise a dropped image path.
+  const isFileDrag = (event) => !!event.dataTransfer?.types.includes('Files');
+  el.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    const accept = isFileDrag(event) && el.classList.contains('active');
+    event.dataTransfer.dropEffect = accept ? 'copy' : 'none';
+    el.classList.toggle('drop-target', accept);
+  });
+  el.addEventListener('dragleave', (event) => {
+    if (!el.contains(event.relatedTarget)) el.classList.remove('drop-target');
+  });
+  el.addEventListener('drop', (event) => {
+    event.preventDefault();
+    el.classList.remove('drop-target');
+    // Only the visible, live terminal accepts a drop; a hidden or stopped one
+    // must never receive input meant for the session on screen.
+    if (!isFileDrag(event) || activeId !== sessionId || !el.classList.contains('active')) return;
+    const files = [...event.dataTransfer.files];
+    if (!files.length) return;
+    const { text, error } = droppedPathText(files);
+    if (error) { showError(error); return; }
+    term.paste(text);
+    term.focus();
+  });
+  // An Option-click (no drag, no selection) positions the cursor; an Option-drag
+  // still selects, as macOptionClickForcesSelection makes it.
+  let optionPress = null;
+  el.addEventListener('mousedown', (event) => {
+    optionPress = event.button === 0 && event.altKey && !event.metaKey && !event.ctrlKey
+      && !event.shiftKey && event.detail === 1 ? { x: event.clientX, y: event.clientY } : null;
+  }, true);
+  el.addEventListener('mouseup', (event) => {
+    const press = optionPress;
+    optionPress = null;
+    if (!press || Math.hypot(event.clientX - press.x, event.clientY - press.y) > 3 || term.hasSelection()) return;
+    if (terminalScrollStates.get(sessionId)?.inCopyMode) return;
+    optionClickMove(sessionId, term, event);
+  }, true);
   el.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -3259,6 +3411,7 @@ $('#empty-add-project').onclick = addProjectHandler;
 window.hangar.onStateChanged((s) => {
   applyAppearance(s.appearance);
   state = s;
+  applyScreenReader();
   // Only an explicit `focusSession` moves the selection. Following
   // `lastActiveSessionId` instead meant every broadcast that happened to carry a
   // different one — a reconcile after a session died, say — silently switched

@@ -7,6 +7,7 @@ const path = require('path');
 
 const HANGAR_DIR = path.join(os.homedir(), '.hangar');
 const CONF = path.join(HANGAR_DIR, 'tmux.conf');
+const KEYS_CONF = path.join(HANGAR_DIR, 'tmux-keys.conf');
 const SOCKET = 'hangar';
 const PREFIX = 'hangar_';
 
@@ -114,6 +115,26 @@ set  -as terminal-features 'xterm*:clipboard:hyperlinks'
 # Do not second-guess fast input as a paste; the heuristic exists to protect
 # key bindings, and there are no key bindings left to protect.
 set  -g  assume-paste-time 0
+`;
+
+// macOS text-editing chords (ADR-072, ADR-073). xterm drops Command chords and
+// sends Option-arrows as M-Left/M-Right, which neither readline nor zsh binds by
+// default. Only tmux knows whether the pane is on the alternate screen, so it
+// decides. On the main screen (shells, REPLs) these become the readline keys
+// iTerm2's "Natural Text Editing" sends. On the alternate screen (vim, less,
+// and agent TUIs such as Claude Code) the program keeps M-Left/M-Right, and the
+// Command chords become Home, End and C-u, which such programs bind themselves:
+// a readline ^A would increment a number in vim.
+// The renderer sends the User keys below for Command-Left, -Right and -Delete.
+const KEY_ROUTING = `# Hangar's macOS editing chords. Rewritten by the app; sourced on every attach.
+set  -s  user-keys[0] "\\e[9001~"
+set  -s  user-keys[1] "\\e[9002~"
+set  -s  user-keys[2] "\\e[9003~"
+bind -T root User0   if-shell -F "#{alternate_on}" { send-keys Home } { send-keys -H 01 }
+bind -T root User1   if-shell -F "#{alternate_on}" { send-keys End } { send-keys -H 05 }
+bind -T root User2   if-shell -F "#{alternate_on}" { send-keys C-u } { send-keys -H 15 }
+bind -T root M-Left  if-shell -F "#{alternate_on}" { send-keys M-Left } { send-keys -H 1b 62 }
+bind -T root M-Right if-shell -F "#{alternate_on}" { send-keys M-Right } { send-keys -H 1b 66 }
 `;
 
 // Every default copy binding ends in `copy-pipe-and-cancel`, and leaving copy
@@ -227,6 +248,9 @@ ${PASSTHROUGH_SETTINGS}`;
 function ensureTmuxConf() {
   try {
     fs.mkdirSync(HANGAR_DIR, { recursive: true });
+    let keys = null;
+    try { keys = fs.readFileSync(KEYS_CONF, 'utf8'); } catch {}
+    if (keys !== KEY_ROUTING) fs.writeFileSync(KEYS_CONF, KEY_ROUTING, 'utf8');
     if (!fs.existsSync(CONF)) {
       fs.writeFileSync(CONF, tmuxConfTemplate(), 'utf8');
       return;
@@ -506,7 +530,9 @@ async function killSession(name) {
   try {
     await tmux(['kill-session', '-t', `=${name}`]);
   } catch (e) {
-    if (!e.noServer) throw e;
+    // Typing `exit` in a shell session ends its tmux session on its own; the
+    // kill's goal is already met, so a missing session is not a failure.
+    if (!e.noServer && !/can't find session/i.test(e.message)) throw e;
   }
 }
 
@@ -563,6 +589,53 @@ async function paneScrollState(name) {
   };
 }
 
+/**
+ * Rows [first, last] of the visible logical line containing `row`, matching
+ * each `capture-pane -J` line against the unjoined rows it was built from.
+ * Null when they cannot be matched (a wrap point inside trailing spaces, say),
+ * so a caller refuses rather than guesses.
+ */
+function logicalLineSpan(rows, joined, row) {
+  let first = 0;
+  for (const line of joined) {
+    if (first >= rows.length) break;
+    const want = line.trimEnd();
+    let last = first;
+    let text = rows[first];
+    while (text.trimEnd() !== want && text.length < want.length && last + 1 < rows.length) {
+      text += rows[++last];
+    }
+    if (text.trimEnd() !== want) return null;
+    if (row >= first && row <= last) return [first, last];
+    first = last + 1;
+  }
+  return null;
+}
+
+/**
+ * Option-click (ADR-073): move the shell's cursor `chars` characters with
+ * arrow keys, as Terminal.app does. Only on the main screen, outside copy mode,
+ * while the cursor is still where the renderer measured from, and only within
+ * the wrapped line the cursor is on — never into earlier output or a
+ * full-screen program.
+ */
+async function moveCursorInLine(name, fromCol, fromRow, toRow, chars) {
+  const target = `=${name}:`;
+  const [alternate, inMode, cursorCol, cursorRow] = (await tmux([
+    'display-message', '-p', '-t', target, '#{alternate_on}|#{pane_in_mode}|#{cursor_x}|#{cursor_y}',
+  ])).trim().split('|');
+  if (alternate !== '0' || inMode !== '0' || Number(cursorCol) !== fromCol || Number(cursorRow) !== fromRow) {
+    return { moved: 0 };
+  }
+  const lines = (out) => out.replace(/\n$/, '').split('\n');
+  const rows = lines(await tmux(['capture-pane', '-p', '-t', target]));
+  const joined = lines(await tmux(['capture-pane', '-p', '-J', '-t', target]));
+  const span = logicalLineSpan(rows, joined, fromRow);
+  if (!span || toRow < span[0] || toRow > span[1] || chars === 0) return { moved: 0 };
+  await tmux(['send-keys', '-t', target, '-N', String(Math.abs(chars)), chars < 0 ? 'Left' : 'Right']);
+  return { moved: chars };
+}
+
 /** Leave tmux copy mode without sending a character to the foreground program. */
 async function scrollPaneToBottom(name) {
   const before = await paneScrollState(name);
@@ -577,12 +650,14 @@ async function scrollPaneToBottom(name) {
  * `direction` is start, next (same direction), or previous (reverse direction).
  */
 async function searchPane(name, query, direction = 'start') {
-  const text = String(query || '').trim();
-  if (!text || text.length > 500) {
+  // Exactly as typed, as in Terminal.app; only all-whitespace means "no query".
+  const text = String(query || '');
+  if (!text.trim() || text.length > 500) {
     return { matchCount: 0, ...(await paneScrollState(name)) };
   }
 
-  const history = await captureFullScrollback(name, true);
+  // Joined, as tmux searches them: a match split by a wrap still counts once.
+  const history = await tmux(['capture-pane', '-p', '-J', '-t', `=${name}:`, '-S', '-']);
   let matchCount = 0;
   for (const line of history.split('\n')) {
     let from = 0;
@@ -600,10 +675,19 @@ async function searchPane(name, query, direction = 'start') {
       await tmux(['copy-mode', '-e', '-t', target]);
       await tmux(['send-keys', '-X', '-t', target, 'search-backward-text', text]);
     } else {
-      await tmux([
-        'send-keys', '-X', '-t', target,
-        direction === 'previous' ? 'search-reverse' : 'search-again',
-      ]);
+      // tmux 3.7b: the first step after a change of direction re-finds the
+      // match under the copy cursor, only moving between its start and end
+      // (measured: x 0 → 8 on the same row for an 8-character query). Such a
+      // step is repeated once; with a single match it stays put either way.
+      const step = direction === 'previous' ? 'search-reverse' : 'search-again';
+      const where = async () => (await tmux(['display-message', '-p', '-t', target,
+        '#{copy_cursor_x}|#{copy_cursor_y}|#{scroll_position}'])).trim().split('|').map(Number);
+      const [x0, y0, s0] = await where();
+      await tmux(['send-keys', '-X', '-t', target, step]);
+      const [x1, y1, s1] = await where();
+      if (y1 === y0 && s1 === s0 && Math.abs(x1 - x0) <= text.length) {
+        await tmux(['send-keys', '-X', '-t', target, step]);
+      }
     }
   }
 
@@ -619,11 +703,13 @@ async function sendKeys(name, text, enter = true) {
 /** Arguments for spawning an attached client. Used by node-pty in Phase 3. */
 function attachArgs(name) {
   // Existing servers have already read tmux.conf. Apply the key transport
-  // settings before attaching too, without restarting any running sessions.
+  // settings and editing chords before attaching too, without restarting any
+  // running sessions.
   return [
     '-L', SOCKET, '-f', CONF,
     'if-shell', '-F', '#{>=:#{version},3.5}',
     'set-option -s extended-keys always ; set-option -s extended-keys-format csi-u',
+    ';', 'source-file', '-q', KEYS_CONF,
     ';', 'attach-session', '-t', `=${name}`,
   ];
 }
@@ -633,6 +719,6 @@ module.exports = {
   tmux, tmuxBin, tmuxEnv, slugify, createSession, listSessions, listPanes,
   hasSession, killSession, killServer, capturePane, captureFullScrollback, sendKeys, attachArgs,
   stopPaneCapture, paneCurrentCommand, captureChatOutput,
-  clearPane, paneScrollState, scrollPaneToBottom, searchPane,
+  clearPane, paneScrollState, scrollPaneToBottom, searchPane, moveCursorInLine, logicalLineSpan,
   ensureTmuxConf, configureSelectionStyle, applySelectionStyle,
 };

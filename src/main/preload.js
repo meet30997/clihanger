@@ -1,6 +1,6 @@
 'use strict';
 
-const { clipboard, contextBridge, ipcRenderer } = require('electron');
+const { clipboard, contextBridge, ipcRenderer, webUtils } = require('electron');
 const {
   validateInvokeRequest,
   validateInvokeResponse,
@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('hangar', {
   termResize: (sessionId, cols, rows) => invokeChecked('term:resize', { sessionId, cols, rows }),
   termClose:  (sessionId)             => invokeChecked('term:close', { sessionId }),
   clearTerminal: (sessionId)          => invokeChecked('term:clear', { sessionId }),
+  moveTerminalCursor: (sessionId, fromCol, fromRow, toRow, chars) =>
+                                     invokeChecked('term:move-cursor', { sessionId, fromCol, fromRow, toRow, chars }),
   searchTerminal: (sessionId, query, direction) =>
                                      invokeChecked('term:search', { sessionId, query, direction }),
   getTerminalScrollState: (sessionId) => invokeChecked('term:scroll-state', { sessionId }),
@@ -64,6 +66,8 @@ contextBridge.exposeInMainWorld('hangar', {
     if (typeof text === 'string' && text.length > 0) clipboard.writeText(text);
   },
   readClipboardText: ()               => clipboard.readText(),
+  // File.path is gone since Electron 32; a dropped File's path comes from here.
+  pathForFile: (file)                 => webUtils.getPathForFile(file),
 
   // ports — Phase 4
   listPorts: ()    => invokeChecked('ports:list'),

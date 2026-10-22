@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] — 2026-10-22
+
+### Added
+- **Drag files from Finder:** Drop files or folders onto a terminal to insert their shell-escaped paths, separated by spaces, without pressing Enter. A drop is refused as a whole if any path contains control characters.
+- **macOS editing chords:** ⌘←/⌘→ move to the start or end of the line, ⌥←/⌥→ move by word and ⌘⌫ deletes to the start of the line. They work in shells and in full-screen programs and agents such as vim, less, Claude Code and Codex.
+- **Option-click moves the cursor:** Option-click on the prompt line moves the cursor to the clicked column, the way it does in Terminal.app.
+- **VoiceOver support:** The terminal switches to screen-reader mode when macOS accessibility support is on, and switches back when it is turned off.
+
+### Changed
+- **Emoji and wide characters:** Grapheme-aware widths (Unicode 15), so emoji, flags and combined characters line up with what tmux draws.
+- **Search:** ⌘F searches for the query exactly as typed, including leading and trailing spaces. The match count is correct across wrapped lines, and Previous no longer gets stuck after a change of direction.
+
+### Fixed
+- **Menu-bar icon:** The menu-bar item shows the app's icon again instead of only a count.
+- **Closing a finished session:** Closing a session whose shell has already exited no longer shows an error.
+
 ## [0.2.0] — 2026-10-20
 
 ### Added

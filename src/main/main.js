@@ -39,14 +39,18 @@ app.setName('CliHanger');
 function createTray() {
   if (tray) return;
 
-  // 32x32 crisp @2x template image for Retina macOS menu bar
-  const png32 = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAHZJREFUWEftluENACAIQ91/6WZg' +
-    'DY5AUb72Lh8k0V2A9LqP5wPge09rQABYAgRgCWwBLAEtAC0kFkALiQXQQmIBtJBYAC0kFkALiQXQQmIBtJBYAC0kFkAL' +
-    'iQXQQmIBtJBYgN+10K8wR3616P2YAP4jQAsLvwLgARpZfB4Veb97AAAAAElFTkSuQmCC',
-    'base64'
-  );
-  const icon = nativeImage.createFromBuffer(png32, { scaleFactor: 2.0 });
+  // The sidebar's brand mark doubles as the menu-bar glyph. A template image is
+  // drawn from its alpha alone, so the white artwork follows the menu bar's
+  // light/dark tint. 18pt is the standard menu-bar icon height.
+  const mark = nativeImage.createFromPath(path.join(__dirname, '..', 'renderer', 'brand-mark.png'));
+  const icon = nativeImage.createEmpty();
+  for (const scaleFactor of [1, 2]) {
+    const size = 18 * scaleFactor;
+    icon.addRepresentation({
+      scaleFactor,
+      buffer: mark.resize({ width: size, height: size, quality: 'best' }).toPNG(),
+    });
+  }
   icon.setTemplateImage(true);
 
   tray = new Tray(icon);
@@ -251,6 +255,8 @@ function handleChecked(channel, handler) {
 function getStateWithTmux(source = sessions.fullState()) {
   const full = { ...source, appearance: currentAppearance };
   if (!hasTmux) full.noTmux = true;
+  // VoiceOver or another assistive technology is running (ADR-073).
+  if (app.accessibilitySupportEnabled) full.screenReader = true;
   return full;
 }
 
@@ -478,6 +484,9 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   syncOptionMetaMenu();
 }
+
+// xterm's screen-reader mode follows assistive technology, so tell the renderer.
+app.on('accessibility-support-changed', () => broadcast('state:changed', getStateWithTmux()));
 
 app.whenReady().then(async () => {
   // Follow macOS; this also drives prefers-color-scheme in the renderer.
@@ -751,6 +760,14 @@ handleChecked('term:clear', async (_e, { sessionId }) => {
   const session = runningTerminalSession(sessionId);
   await tmux.clearPane(session.tmuxName);
   return { ok: true };
+});
+
+handleChecked('term:move-cursor', async (_e, { sessionId, fromCol, fromRow, toRow, chars }) => {
+  if (![fromCol, fromRow, toRow, chars].every(Number.isInteger) || Math.abs(chars) > 4096) {
+    throw new TypeError('Invalid cursor move');
+  }
+  const session = runningTerminalSession(sessionId);
+  return tmux.moveCursorInLine(session.tmuxName, fromCol, fromRow, toRow, chars);
 });
 
 handleChecked('term:search', async (_e, { sessionId, query, direction }) => {

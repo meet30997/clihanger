@@ -17,7 +17,7 @@ const array = (required, optional = []) => ({
 
 const state = (extraOptional = []) => object(
   ['version', 'projects', 'sessions', 'lastActiveSessionId', 'agents', 'appearance'],
-  ['noTmux', ...extraOptional]
+  ['noTmux', 'screenReader', ...extraOptional]
 );
 
 const invokes = {
@@ -40,6 +40,7 @@ const invokes = {
   'term:resize':           { request: object(['sessionId', 'cols', 'rows']), response: nothing() },
   'term:close':            { request: object(['sessionId']), response: nothing() },
   'term:clear':            { request: object(['sessionId']), response: object(['ok']) },
+  'term:move-cursor':      { request: object(['sessionId', 'fromCol', 'fromRow', 'toRow', 'chars']), response: object(['moved']) },
   'term:search':           { request: object(['sessionId', 'query', 'direction']), response: object(
     ['matchCount', 'inCopyMode', 'scrollPosition']
   ) },
