@@ -84,6 +84,39 @@ function removeProject(projectId) {
   return store.save(state);
 }
 
+/** Move an item to sit just before `beforeId`, or to the end when it is null. */
+function moveBefore(list, item, beforeId, end = list.length) {
+  const from = list.indexOf(item);
+  list.splice(from, 1);
+  const to = beforeId ? list.findIndex((x) => x.id === beforeId) : -1;
+  list.splice(to >= 0 ? to : (end > from ? end - 1 : end), 0, item);
+}
+
+function moveProject(projectId, beforeProjectId) {
+  const state = store.load();
+  const project = state.projects.find((p) => p.id === projectId);
+  if (project && project.id !== beforeProjectId) {
+    moveBefore(state.projects, project, beforeProjectId);
+    store.save(state);
+  }
+  return fullState();
+}
+
+// Sessions reorder within their own project only: moving one between projects
+// would change which folder it belongs to, and its shell is already running there.
+function moveSession(sessionId, beforeSessionId) {
+  const state = store.load();
+  const session = state.sessions.find((s) => s.id === sessionId);
+  const before = state.sessions.find((s) => s.id === beforeSessionId);
+  if (session && session !== before && (!before || before.projectId === session.projectId)) {
+    const siblings = state.sessions.filter((s) => s.projectId === session.projectId);
+    const end = state.sessions.indexOf(siblings[siblings.length - 1]) + 1;
+    moveBefore(state.sessions, session, before?.id ?? null, end);
+    store.save(state);
+  }
+  return fullState();
+}
+
 function execGit(args, cwd) {
   return new Promise((resolve, reject) => {
     execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -836,6 +869,8 @@ module.exports = {
   reconcile,
   addProject,
   removeProject,
+  moveProject,
+  moveSession,
   createSession,
   killSession,
   parkSessions,

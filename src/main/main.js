@@ -61,8 +61,7 @@ function createTray() {
 function getWaitingSessions() {
   const state = store.load();
   return state.sessions.filter((s) => {
-    const d = status.getDetails(s.id);
-    return !s.pending && s.tmuxName && d && d.status === 'needs_input' && !d.snoozed;
+    return !s.pending && s.tmuxName && status.isWaiting(status.getDetails(s.id));
   });
 }
 
@@ -124,11 +123,11 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate(menuItems));
 }
 
-function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, reason, tailExcerpt }) {
+function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt }) {
   // 'gone' is internal only and must not be broadcast to renderer
   if (!status.VALID_STATUSES.has(s)) return;
 
-  broadcast('status:changed', { sessionId, status: s, waitingSince, snoozed, reason, tailExcerpt });
+  broadcast('status:changed', { sessionId, status: s, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt });
 
   const waiting = getWaitingSessions().length;
   if (app.dock) app.dock.setBadge(waiting ? String(waiting) : '');
@@ -136,7 +135,7 @@ function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed,
 
   // only notify on meaningful transitions, and never on first classification
   if (!prev || prev === s) return;
-  if (snoozed) return;
+  if (snoozed || seen) return;
 
   const state = store.load();
   const session = state.sessions.find((x) => x.id === sessionId);
@@ -212,7 +211,7 @@ function createWindow() {
     titleBarStyle: 'hidden',
     // Center native controls in the 52px toolbar.
     trafficLightPosition: { x: 20, y: 20 },
-    backgroundColor: currentAppearance.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e1e',
+    backgroundColor: currentAppearance.effectiveAppearance === 'light' ? '#ffffff' : '#181818',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -228,6 +227,10 @@ function createWindow() {
     app.quit();
   });
   win.webContents.on('did-finish-load', syncOptionMetaMenu);
+  win.on('focus', syncViewer);
+  win.on('blur', syncViewer);
+  win.on('hide', syncViewer);
+  win.on('closed', syncViewer);
 
   // Wire fullscreen body class for traffic-light clearance (D1)
   win.on('enter-full-screen', () => {
@@ -236,6 +239,14 @@ function createWindow() {
   win.on('leave-full-screen', () => {
     win?.webContents.executeJavaScript("document.body.classList.remove('fullscreen')").catch(() => {});
   });
+}
+
+// The session whose terminal the renderer shows; it counts as seen only while
+// the window is focused.
+let viewingSessionId = null;
+function syncViewer() {
+  const focused = win && !win.isDestroyed() && win.isFocused() && win.isVisible();
+  status.setViewer(focused ? viewingSessionId : null, handleStatusChange);
 }
 
 function broadcast(channel, payload) {
@@ -263,7 +274,7 @@ function getStateWithTmux(source = sessions.fullState()) {
 function updateAppearance(next, shouldBroadcast) {
   currentAppearance = next;
   if (win && !win.isDestroyed()) {
-    win.setBackgroundColor(next.effectiveAppearance === 'light' ? '#ffffff' : '#1e1e1e');
+    win.setBackgroundColor(next.effectiveAppearance === 'light' ? '#ffffff' : '#181818');
   }
   try {
     tmux.configureSelectionStyle(next.selectionBackground, next.selectionForeground);
@@ -624,6 +635,18 @@ handleChecked('project:remove', async (_e, { projectId }) => {
   return state;
 });
 
+handleChecked('project:move', async (_e, { projectId, beforeProjectId }) => {
+  const state = getStateWithTmux(sessions.moveProject(projectId, beforeProjectId));
+  broadcast('state:changed', state);
+  return state;
+});
+
+handleChecked('session:move', async (_e, { sessionId, beforeSessionId }) => {
+  const state = getStateWithTmux(sessions.moveSession(sessionId, beforeSessionId));
+  broadcast('state:changed', state);
+  return state;
+});
+
 handleChecked('session:create', async (_e, { projectId, agentId, branch }) => {
   await sessions.createSession({ projectId, agentId, branch });
   const state = getStateWithTmux();
@@ -719,6 +742,7 @@ handleChecked('term:open', async (_e, { sessionId, cols, rows, resume }) => {
     broadcast('state:changed', getStateWithTmux());
   }
 
+  status.noteUserActivity(sessionId);
   ptyman.open({
     sessionId,
     tmuxName: session.tmuxName,
@@ -740,12 +764,22 @@ handleChecked('term:open', async (_e, { sessionId, cols, rows, resume }) => {
   return { ok: true };
 });
 
+handleChecked('session:viewing', (_e, { sessionId }) => {
+  viewingSessionId = sessionId;
+  syncViewer();
+});
+
 handleChecked('term:input', (_e, { sessionId, data, chatTitle }) => {
+  // Typing repaints the input line; Enter starts a turn, which is real work.
+  if (!/[\r\n]/.test(data)) status.noteUserActivity(sessionId);
   ptyman.write(sessionId, data);
   chatTitles.acceptInputTitle(sessionId, data, chatTitle);
   if (/[\r\n]/.test(data)) chatTitles.schedule(sessionId);
 });
-handleChecked('term:resize', (_e, { sessionId, cols, rows }) => ptyman.resize(sessionId, cols, rows));
+handleChecked('term:resize', (_e, { sessionId, cols, rows }) => {
+  status.noteUserActivity(sessionId);
+  ptyman.resize(sessionId, cols, rows);
+});
 handleChecked('term:close',  (_e, { sessionId })             => ptyman.close(sessionId));
 
 function runningTerminalSession(sessionId) {

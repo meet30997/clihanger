@@ -24,6 +24,8 @@ const invokes = {
   'state:get':             { request: nothing(), response: state() },
   'project:add':           { request: nothing(), response: state() },
   'project:remove':        { request: object(['projectId']), response: state() },
+  'project:move':          { request: object(['projectId', 'beforeProjectId']), response: state() },
+  'session:move':          { request: object(['sessionId', 'beforeSessionId']), response: state() },
   'session:create':        { request: object(['projectId', 'agentId'], ['branch']), response: state() },
   'session:rename':        { request: object(['sessionId', 'title']), response: state() },
   'session:history':       { request: object(['sessionId']), response: array(['conversationId', 'title', 'createdAt', 'updatedAt']) },
@@ -32,9 +34,10 @@ const invokes = {
   'session:conversation':  { request: object(['sessionId', 'conversationId']), response: state() },
   'status:snooze':         { request: object(['sessionId', 'snoozed']), response: object(['ok', 'snoozed']) },
   'status:details':        { request: object(['sessionId']), response: object(
-    ['status', 'waitingSince', 'snoozed', 'transitionedAt', 'reason', 'tailExcerpt', 'source'], [], true
+    ['status', 'waitingSince', 'snoozed', 'transitionedAt', 'reason', 'tailExcerpt', 'source'], ['promptKind', 'seen'], true
   ) },
   'session:kill':          { request: object(['sessionId']), response: state(['lastWarning']) },
+  'session:viewing':       { request: object(['sessionId']), response: nothing() },
   'term:open':             { request: object(['sessionId', 'cols', 'rows'], ['resume']), response: object(['ok'], ['error']) },
   'term:input':            { request: object(['sessionId', 'data'], ['chatTitle']), response: nothing() },
   'term:resize':           { request: object(['sessionId', 'cols', 'rows']), response: nothing() },
@@ -72,7 +75,7 @@ const invokes = {
 const events = {
   'term:data':      object(['sessionId', 'data']),
   'state:changed':  state(['focusSession']),
-  'status:changed': object(['sessionId', 'status'], ['waitingSince', 'snoozed', 'reason', 'tailExcerpt']),
+  'status:changed': object(['sessionId', 'status'], ['waitingSince', 'snoozed', 'promptKind', 'seen', 'reason', 'tailExcerpt']),
   'term:context-action': object(['sessionId', 'action'], ['linkUrl']),
 };
 

@@ -14,7 +14,14 @@ let state = {
 let appearance = { ...DEFAULT_APPEARANCE };
 let activeId = null;
 const statuses = {};   // sessionId → status
-const statusMetadata = {}; // sessionId → { waitingSince, snoozed, reason, tailExcerpt }
+const statusMetadata = {}; // sessionId → { waitingSince, snoozed, promptKind, seen, reason, tailExcerpt }
+
+/** Mirrors `status.isWaiting` in main: a reply you have looked at is no longer waiting. */
+function isWaitingStatus(sessionId) {
+  const meta = statusMetadata[sessionId];
+  return statuses[sessionId] === 'needs_input' && !meta?.snoozed
+    && !(meta?.promptKind === 'reply' && meta?.seen);
+}
 const collapsedProjects = new Set();
 try {
   const saved = JSON.parse(localStorage.getItem('hangar.collapsedProjects') || '[]');
@@ -107,7 +114,7 @@ document.addEventListener('scroll', hideIdentityDetail, true);
 const TERMINAL_THEMES = {
   dark: {
     // Every colour except black is >= 4.8:1 on the background.
-    background: '#1e1e1e', foreground: '#e8e8ea', cursor: '#8cc4ff',
+    background: '#181818', foreground: '#ececec', cursor: '#8fb4ff',
     black: '#3a3a3c', red: '#ff6b61', green: '#4fd17a', yellow: '#e5c07b',
     blue: '#5aa9ff', magenta: '#d78bf0', cyan: '#4fd0d6', white: '#d6d6db',
     brightBlack: '#8a8a90', brightRed: '#ff8a80', brightGreen: '#7ee59b',
@@ -1558,14 +1565,16 @@ function updateStatusDot(sessionId, status, snoozed = false) {
     dot.setAttribute('aria-label', `Status: ${readableStatus}`);
     dot.setAttribute('data-session-id', sessionId);
   }
-  sessionEl.classList.toggle('attention', status === 'needs_input' && !snoozed);
+  sessionEl.classList.toggle('attention', isWaitingStatus(sessionId));
 }
 
-window.hangar.onStatusChanged(({ sessionId, status, waitingSince, snoozed, reason, tailExcerpt }) => {
+window.hangar.onStatusChanged(({ sessionId, status, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt }) => {
   statuses[sessionId] = status;
   statusMetadata[sessionId] = {
     waitingSince: waitingSince || null,
     snoozed: !!snoozed,
+    promptKind: promptKind || null,
+    seen: !!seen,
     reason: reason || null,
     tailExcerpt: tailExcerpt || null,
   };
@@ -1588,7 +1597,7 @@ function refreshWaitingDurations() {
     const id = el.dataset.waitingSession;
     const meta = statusMetadata[id];
     const session = state.sessions.find((row) => row.id === id);
-    const waiting = !session?.pending && statuses[id] === 'needs_input' && meta?.waitingSince;
+    const waiting = !session?.pending && isWaitingStatus(id) && meta?.waitingSince;
     el.textContent = waiting ? formatDuration(Math.max(0, Math.floor((Date.now() - meta.waitingSince) / 1000))) : '';
   });
 }
@@ -1717,8 +1726,7 @@ function agentIcon(agent) {
 }
 
 function waitingSessionsInOrder() {
-  return orderedSessions().filter((s) => !s.pending && !!s.tmuxName
-    && statuses[s.id] === 'needs_input' && !statusMetadata[s.id]?.snoozed)
+  return orderedSessions().filter((s) => !s.pending && !!s.tmuxName && isWaitingStatus(s.id))
     .sort((a, b) => (statusMetadata[a.id]?.waitingSince || 0) - (statusMetadata[b.id]?.waitingSince || 0));
 }
 
@@ -1757,12 +1765,27 @@ function refreshAttention() {
   refreshWaitingDurations();
 }
 
+// Tell main which terminal is on screen, so a reply that finishes while you
+// watch it, or that you open, counts as seen.
+let reportedViewing;
+function reportViewing() {
+  const session = !portsView && state.sessions.find((s) => s.id === activeId);
+  const viewing = session && !session.pending ? session.id : null;
+  if (viewing === reportedViewing) return;
+  reportedViewing = viewing;
+  window.hangar.setViewing(viewing).catch(() => {});
+}
+
 function observedStatus(session) {
   if (parkedStarts.has(session.id)) return 'Starting…';
   if (session.pending) return 'Stopped';
   const status = statuses[session.id];
+  const meta = statusMetadata[session.id];
   const labels = { needs_input: 'Waiting for input', working: 'Working', idle: 'No recent output', exited: 'Agent exited' };
-  return (labels[status] || 'Not yet observed') + (statusMetadata[session.id]?.snoozed ? ' · snoozed' : '');
+  let label = labels[status] || 'Not yet observed';
+  if (status === 'needs_input' && meta?.promptKind === 'approval') label = 'Needs approval';
+  if (status === 'needs_input' && meta?.promptKind === 'reply' && meta.seen) label = 'Reply seen';
+  return label + (meta?.snoozed ? ' · snoozed' : '');
 }
 
 function refreshWorkspaceChrome() {
@@ -1959,9 +1982,102 @@ $('#current-status').onkeydown = (event) => {
 };
 setInterval(() => { if (portsView) refreshWorkspaceChrome(); }, 1000);
 
+/* ---------- Sidebar Reordering ---------- */
+
+// The row being dragged. dataTransfer contents are unreadable during dragover,
+// so drop targets read this instead. Rebuilding the tree mid-drag would detach
+// the drag source, so render() waits for the drag to end.
+let sidebarDrag = null;
+let renderAfterDrag = false;
+
+function clearDropMarks() {
+  $('#tree').querySelectorAll('.drop-before, .drop-after')
+    .forEach((el) => el.classList.remove('drop-before', 'drop-after'));
+}
+
+/** Move `id` to sit before `beforeId` (null: last) among `siblingIds`, unless that is where it is. */
+async function moveSidebarItem(kind, id, beforeId, siblingIds) {
+  const index = siblingIds.indexOf(id);
+  if (beforeId === id || beforeId === (siblingIds[index + 1] ?? null)) return;
+  try {
+    state = kind === 'project'
+      ? await window.hangar.moveProject(id, beforeId)
+      : await window.hangar.moveSession(id, beforeId);
+    render();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+/** ⌥⌘↑ / ⌥⌘↓ moves the focused row: the keyboard path for drag to reorder. */
+function handleReorderKey(e, kind, id, siblingIds) {
+  if (!e.altKey || !e.metaKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return false;
+  e.preventDefault();
+  const index = siblingIds.indexOf(id);
+  if (e.key === 'ArrowUp' && index > 0) moveSidebarItem(kind, id, siblingIds[index - 1], siblingIds);
+  if (e.key === 'ArrowDown' && index < siblingIds.length - 1) {
+    moveSidebarItem(kind, id, siblingIds[index + 2] ?? null, siblingIds);
+  }
+  return true;
+}
+
+/**
+ * Let `handle` drag `target` (a project group or a session row) among the rows
+ * of the same `group`. A drop on the top half of a row lands before it; on the
+ * bottom half, after it.
+ */
+function enableReorder(handle, target, kind, id, group, siblingIds) {
+  handle.draggable = true;
+  handle.addEventListener('dragstart', (e) => {
+    e.stopPropagation();
+    sidebarDrag = { kind, id, group };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData(`application/x-clihanger-${kind}`, id);
+    hideIdentityDetail();
+    requestAnimationFrame(() => target.classList.add('dragging'));
+  });
+  handle.addEventListener('dragend', () => {
+    sidebarDrag = null;
+    target.classList.remove('dragging');
+    clearDropMarks();
+    if (renderAfterDrag) render();
+  });
+  const accepts = () => sidebarDrag?.kind === kind && sidebarDrag.group === group;
+  const dropsAfter = (e) => {
+    const rect = target.getBoundingClientRect();
+    return e.clientY > rect.top + rect.height / 2;
+  };
+  target.addEventListener('dragover', (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const after = dropsAfter(e);
+    if (target.classList.contains(after ? 'drop-after' : 'drop-before')) return;
+    clearDropMarks();
+    if (sidebarDrag.id !== id) target.classList.add(after ? 'drop-after' : 'drop-before');
+  });
+  target.addEventListener('dragleave', (e) => {
+    if (!target.contains(e.relatedTarget)) target.classList.remove('drop-before', 'drop-after');
+  });
+  target.addEventListener('drop', (e) => {
+    if (!accepts()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearDropMarks();
+    const beforeId = dropsAfter(e) ? siblingIds[siblingIds.indexOf(id) + 1] ?? null : id;
+    moveSidebarItem(kind, sidebarDrag.id, beforeId, siblingIds);
+  });
+}
+
 /* ---------- Rendering Tree & Affordances ---------- */
 
 function render() {
+  if (sidebarDrag) {
+    renderAfterDrag = true;
+    return;
+  }
+  renderAfterDrag = false;
   const tree = $('#tree');
   const treeScrollTop = $('.sidebar-scroll').scrollTop;
   const focused = tree.contains(document.activeElement) ? document.activeElement : null;
@@ -1982,6 +2098,7 @@ function render() {
     groups.push({ project: { id: null, name: 'Unassigned' }, sessions: orphans });
   }
 
+  const projectIds = state.projects.map((p) => p.id);
   for (const g of groups) {
     const isCollapsed = g.project.id && collapsedProjects.has(g.project.id);
     const wrap = document.createElement('div');
@@ -2007,6 +2124,7 @@ function render() {
         render();
       };
       toggle.onkeydown = (e) => {
+        if (handleReorderKey(e, 'project', g.project.id, projectIds)) return;
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
         e.preventDefault();
         if ((e.key === 'ArrowRight') === !!isCollapsed) toggle.click();
@@ -2068,6 +2186,7 @@ function render() {
       actions.appendChild(launchBtn);
 
       row.appendChild(actions);
+      enableReorder(row, wrap, 'project', g.project.id, 'projects', projectIds);
     }
     wrap.appendChild(row);
 
@@ -2196,6 +2315,8 @@ function render() {
     const sessionsContainer = document.createElement('div');
     sessionsContainer.className = 'project-sessions';
 
+    const sessionIds = g.sessions.map((s) => s.id);
+    const sessionGroup = `sessions:${g.project.id}`;
     for (const s of g.sessions) {
       const agent = state.agents[s.agentId] || { label: s.agentId, color: '#7b7b7c' };
       const el = document.createElement('div');
@@ -2241,7 +2362,7 @@ function render() {
       el.className = 'session'
         + (!portsView && s.id === activeId ? ' active' : '')
         + (s.pending ? ' pending' : '')
-        + (st === 'needs_input' && !isSnoozed ? ' attention' : '');
+        + (!s.pending && isWaitingStatus(s.id) ? ' attention' : '');
 
       // Closing a session is a per-row affordance, revealed on hover, rather
       // than a button in the topbar that only ever acted on the active one.
@@ -2264,6 +2385,7 @@ function render() {
       el.onclick = () => selectSession(s.id);
       el.onkeydown = (ke) => {
         if (ke.target !== el) return;
+        if (handleReorderKey(ke, 'session', s.id, sessionIds)) return;
         if (ke.key === 'Enter' || ke.key === ' ') {
           ke.preventDefault();
           selectSession(s.id);
@@ -2276,6 +2398,7 @@ function render() {
         showContextMenu(ce.clientX, ce.clientY, s.id);
       };
 
+      enableReorder(el, el, 'session', s.id, sessionGroup, sessionIds);
       sessionsContainer.appendChild(el);
     }
 
@@ -2384,6 +2507,7 @@ function render() {
   }
   refreshWorkspaceChrome();
   refreshAttention();
+  reportViewing();
   renderStoppedSession(active);
   refreshSessionInspector();
 }
@@ -2817,6 +2941,7 @@ function updateSwitcher(query) {
       lifecycle: lifecycleLabel(s),
       waitingSince: meta.waitingSince || null,
       snoozed: !!meta.snoozed,
+      waiting: !s.pending && isWaitingStatus(s.id),
       haystack: `${sessionDisplayName(s)} ${s.note ?? ''} ${agent.label} ${project?.name ?? ''} ${s.tmuxName}`.toLowerCase(),
     };
   });
@@ -2824,12 +2949,12 @@ function updateSwitcher(query) {
   if (q) swItems = swItems.filter((i) => i.haystack.includes(q));
 
   // Attention queue sorting (F2):
-  // 1. Active waiting sessions (needs_input && !snoozed), oldest waitingSince first
+  // 1. Active waiting sessions (needs_input, not snoozed, not a seen reply), oldest waitingSince first
   // 2. Snoozed waiting sessions (needs_input && snoozed), oldest waitingSince first
   // 3. All other sessions in default order
   swItems.sort((a, b) => {
-    const aWait = a.status === 'needs_input' && !a.snoozed;
-    const bWait = b.status === 'needs_input' && !b.snoozed;
+    const aWait = !!a.waiting;
+    const bWait = !!b.waiting;
     if (aWait && bWait) {
       return (a.waitingSince || 0) - (b.waitingSince || 0);
     }
@@ -2872,6 +2997,7 @@ function updateSwitcher(query) {
             status: statuses[res.sessionId] || 'idle',
             waitingSince: meta.waitingSince || null,
             snoozed: !!meta.snoozed,
+            waiting: isWaitingStatus(res.sessionId),
           });
         }
       }
@@ -2918,7 +3044,7 @@ function renderSwitcher() {
       dot.setAttribute('aria-label', item.lifecycle);
     }
 
-    if (item.status === 'needs_input') {
+    if (item.waiting || (item.status === 'needs_input' && item.snoozed)) {
       const waitSpan = document.createElement('span');
       waitSpan.className = 'sw-waiting' + (item.snoozed ? ' snoozed' : '');
       if (item.waitingSince) {

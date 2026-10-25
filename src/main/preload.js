@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('hangar', {
   getState:      ()               => invokeChecked('state:get'),
   addProject:    ()               => invokeChecked('project:add'),
   removeProject: (projectId)      => invokeChecked('project:remove', { projectId }),
+  moveProject:   (projectId, beforeProjectId) =>
+                                     invokeChecked('project:move', { projectId, beforeProjectId }),
+  moveSession:   (sessionId, beforeSessionId) =>
+                                     invokeChecked('session:move', { sessionId, beforeSessionId }),
   createSession: (projectId, agentId, branch) =>
                                      invokeChecked('session:create', { projectId, agentId, branch }),
   renameSession: (sessionId, title) =>
@@ -31,6 +35,7 @@ contextBridge.exposeInMainWorld('hangar', {
                                      invokeChecked('session:note', { sessionId, note }),
   setSessionConversation: (sessionId, conversationId) =>
                                      invokeChecked('session:conversation', { sessionId, conversationId }),
+  setViewing:   (sessionId)      => invokeChecked('session:viewing', { sessionId }),
   snoozeStatus: (sessionId, snoozed) =>
                                      invokeChecked('status:snooze', { sessionId, snoozed }),
   getStatusDetails: (sessionId) =>

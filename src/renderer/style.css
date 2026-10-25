@@ -17,6 +17,7 @@
   --selection: #b3d7ff; --selection-text: #fff; --selection-inactive: #dcdce0;
   --status-working: #248a3d; --status-needs-input: #c45c00; --status-idle: #8e8e93;
   --segment-on: #fff; --hover-tint: #0000001a; --ring: #0000001a;
+  --active-dot-ring: #fff;
   --shadow: rgba(0, 0, 0, .16); --shadow-strong: rgba(0, 0, 0, .22); --backdrop: rgba(0, 0, 0, .25);
   --brand-mark-filter: invert(1); --mono-artwork-filter: none;
   --space-1: 2px; --space-2: 4px; --space-3: 8px; --space-4: 12px;
@@ -28,24 +29,26 @@
   --font-mono: 'SF Mono', Menlo, Monaco, monospace;
 }
 
-/* Dark values are tuned for reading, not sampled: every text token is at
-   least 4.5:1 on every surface it sits on (--text 13:1+, --dim 5.2:1+). */
+/* Dark surfaces are sampled from the Codex desktop app: true neutral grays,
+   darkest at the canvas, and a gray (not blue) selected row. Every text token
+   is at least 4.5:1 on every surface it sits on (--text 12:1+, --dim 5.0:1+). */
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --bg: #1e1e1e; --panel: #252527; --panel-input: #2c2c2e;
-    --panel-raised: #2c2c2e; --panel-hover: #353538; --selected: #0b5bd3;
-    --toolbar: #232325; --inspector: #232325; --code: #2c2c2e;
-    --line: #3e3e42; --line-soft: #313134;
-    --text: #f0f0f2; --text-soft: #d6d6db; --dim: #a9a9b0;
-    --muted: #a9a9b0; --faint: #a9a9b0; --placeholder: #98989f;
-    --accent: #5aa9ff; --accent-strong: #8cc4ff; --danger: #ff6b61;
+    --bg: #181818; --panel: #1e1e1e; --panel-input: #363636;
+    --panel-raised: #2a2a2a; --panel-hover: #282828; --selected: #303030;
+    --toolbar: #181818; --inspector: #1e1e1e; --code: #2a2a2a;
+    --line: #2e2e2e; --line-soft: #262626;
+    --text: #ffffff; --text-soft: #e6e6e6; --dim: #a7a7a7;
+    --muted: #a7a7a7; --faint: #a7a7a7; --placeholder: #6f6f6f;
+    --accent: #8fb4ff; --accent-strong: #b3ccff; --danger: #ff6b61;
     --danger-bg: #ff453a24; --danger-border: #ff453a59;
-    --warning: #ffa94d; --success: #4fd17a;
-    --fill: #0b5bd3; --fill-idle: #4a4a4e; --on-fill: #fff;
+    --warning: #fe9259; --success: #4fd17a;
+    --fill: #4a6fc4; --fill-idle: #4a4a4e; --on-fill: #fff;
     --selection: #3f638b; --selection-text: #fff; --selection-inactive: #464b52;
     --status-working: #32c35c; --status-needs-input: #ff9f2e; --status-idle: #8e8e93;
-    --segment-on: #5a5a5e; --hover-tint: #ffffff1f; --ring: #ffffff1f;
+    --segment-on: #3a3a3a; --hover-tint: #ffffff14; --ring: #ffffff14;
+    --active-dot-ring: transparent;
     --shadow: rgba(0, 0, 0, .45); --shadow-strong: rgba(0, 0, 0, .55); --backdrop: rgba(0, 0, 0, .5);
     --brand-mark-filter: none; --mono-artwork-filter: invert(1);
   }
@@ -193,7 +196,7 @@ body.sidebar-collapsed #sidebar {
 .icon-button:hover { background: var(--panel-hover); color: var(--text); }
 .icon-button .icon { width: 17px; height: 17px; stroke-width: 1.3; }
 #sidebar-search, #add-project { width: 24px; height: 24px; }
-.nav-row, .attention-row { display: flex; align-items: center; gap: 8px; height: 28px; width: 100%; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.nav-row, .attention-row { display: flex; align-items: center; gap: 8px; height: 30px; width: 100%; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .nav-row:hover, .attention-row:hover { background: var(--panel-hover); }
 .nav-row > .icon-slot { color: var(--accent); }
 .nav-label, .attention-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -271,7 +274,19 @@ body.sidebar-collapsed #sidebar {
 .empty-project .project-sessions { display: none; }
 .project.collapsed .project-sessions { display: none; }
 
-.session { position: relative; display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 10px; margin: 0; border-radius: 6px; color: var(--text); cursor: pointer; min-width: 0; }
+/* Drag to reorder: the dragged row dims; a line marks where it will land. */
+.project.dragging, .session.dragging { opacity: .4; }
+.project { position: relative; }
+.project.drop-before::before, .project.drop-after::after,
+.session.drop-before::before, .session.drop-after::after {
+  content: ''; position: absolute; left: 6px; right: 6px; height: 2px; border-radius: 1px; background: var(--accent); pointer-events: none;
+}
+.session.drop-before::before { top: -1px; }
+.session.drop-after::after { bottom: -1px; }
+.project.drop-before::before { top: -7px; }
+.project.drop-after::after { bottom: -7px; }
+
+.session { position: relative; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; margin: 0; border-radius: 8px; color: var(--text); cursor: pointer; min-width: 0; }
 .session:hover { background: var(--panel-hover); }
 .session:hover, .session:focus-within { padding-right: 30px; }
 .session-copy { flex: 1; min-width: 0; }
@@ -290,7 +305,7 @@ body.sidebar-collapsed #sidebar {
 .session-close:hover { background: var(--hover-tint); }
 .status-dot { width: 7px; height: 7px; flex: 0 0 7px; display: inline-flex; border-radius: 50%; }
 .status-working, .status-needs_input, .status-idle { box-shadow: inset 0 0 0 .5px var(--ring); }
-.session.active > .status-dot { box-shadow: 0 0 0 1.5px #fff; }
+.session.active > .status-dot { box-shadow: 0 0 0 1.5px var(--active-dot-ring); }
 .status-working { background: var(--status-working); }
 .status-needs_input { background: var(--status-needs-input); }
 .status-idle { background: var(--status-idle); }
