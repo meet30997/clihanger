@@ -34,7 +34,7 @@ const invokes = {
   'session:conversation':  { request: object(['sessionId', 'conversationId']), response: state() },
   'status:snooze':         { request: object(['sessionId', 'snoozed']), response: object(['ok', 'snoozed']) },
   'status:details':        { request: object(['sessionId']), response: object(
-    ['status', 'waitingSince', 'snoozed', 'transitionedAt', 'reason', 'tailExcerpt', 'source'], ['promptKind', 'seen'], true
+    ['status', 'waitingSince', 'snoozed', 'transitionedAt', 'reason', 'tailExcerpt', 'source'], ['promptKind', 'seen', 'stale'], true
   ) },
   'session:kill':          { request: object(['sessionId']), response: state(['lastWarning']) },
   'session:viewing':       { request: object(['sessionId']), response: nothing() },
@@ -75,7 +75,7 @@ const invokes = {
 const events = {
   'term:data':      object(['sessionId', 'data']),
   'state:changed':  state(['focusSession']),
-  'status:changed': object(['sessionId', 'status'], ['waitingSince', 'snoozed', 'promptKind', 'seen', 'reason', 'tailExcerpt']),
+  'status:changed': object(['sessionId', 'status'], ['waitingSince', 'snoozed', 'promptKind', 'seen', 'stale', 'reason', 'tailExcerpt']),
   'term:context-action': object(['sessionId', 'action'], ['linkUrl']),
 };
 

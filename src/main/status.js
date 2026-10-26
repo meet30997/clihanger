@@ -160,7 +160,7 @@ async function classify(session) {
 }
 
 /**
- * @param {(payload: {sessionId: string, status: string, prev: string, waitingSince?: number, snoozed?: boolean, promptKind?: string, seen?: boolean, reason?: string, tailExcerpt?: string}) => void} onChange
+ * @param {(payload: {sessionId: string, status: string, prev: string, waitingSince?: number, snoozed?: boolean, promptKind?: string, seen?: boolean, stale?: boolean, reason?: string, tailExcerpt?: string}) => void} onChange
  * @param {(sessionId: string) => void} [onGone]
  */
 function start(onChange, onGone) {
@@ -179,12 +179,20 @@ function start(onChange, onGone) {
       try {
         res = await classify(session);
       } catch (err) {
+        // Keep the last known status, but say it is no longer being observed.
         const previous = memory.get(session.id);
-        if (previous) memory.set(session.id, {
-          ...previous,
-          reason: `Observation unavailable; previous status is stale: ${err.message}`,
-          tailExcerpt: null,
-        });
+        if (previous) {
+          const staleEntry = {
+            ...previous,
+            stale: true,
+            reason: `Observation unavailable; previous status is stale: ${err.message}`,
+            tailExcerpt: null,
+          };
+          memory.set(session.id, staleEntry);
+          if (!previous.stale && VALID_STATUSES.has(staleEntry.status)) {
+            onChange(changePayload(session.id, staleEntry, staleEntry.status));
+          }
+        }
         continue;
       }
       const entry = memory.get(session.id) || {};
@@ -216,6 +224,7 @@ function start(onChange, onGone) {
         promptKind: status === 'needs_input' ? (res.promptKind || null) : null,
         // Only real agent work makes a seen reply new again.
         seen: status === 'working' && !res.echo ? false : !!entry.seen,
+        stale: false,
         reason: res.reason,
         tailExcerpt: res.excerpt || null,
         source: 'poll',
@@ -227,7 +236,7 @@ function start(onChange, onGone) {
         // Session disappeared from tmux externally: trigger reconciliation
         if (entry.status !== status && onGone) onGone(session.id);
       } else if (VALID_STATUSES.has(status) && (entry.status !== status
-          || entry.promptKind !== newEntry.promptKind || !!entry.seen !== newEntry.seen)) {
+          || entry.promptKind !== newEntry.promptKind || !!entry.seen !== newEntry.seen || !!entry.stale)) {
         onChange(changePayload(session.id, newEntry, prev));
       }
     }
@@ -267,13 +276,14 @@ function setStatus(sessionId, newStatus, onChange, reason = 'Reported via hook')
     // A hook does not say whether it is reporting a finished turn or a question.
     promptKind: null,
     seen: newStatus === 'working' ? false : !!entry.seen,
+    stale: false,
     reason,
     tailExcerpt: null,
     source: 'hook',
   };
   markSeenIfViewed(sessionId, newEntry);
   memory.set(sessionId, newEntry);
-  if (entry.status !== newStatus || !!entry.seen !== newEntry.seen) {
+  if (entry.status !== newStatus || !!entry.seen !== newEntry.seen || !!entry.stale) {
     if (onChange) onChange(changePayload(sessionId, newEntry, prev));
   }
   return true;
@@ -299,6 +309,7 @@ function changePayload(sessionId, entry, prev) {
     snoozed: !!entry.snoozed,
     promptKind: entry.promptKind || null,
     seen: !!entry.seen,
+    stale: !!entry.stale,
     reason: entry.reason,
     tailExcerpt: entry.tailExcerpt || null,
   };
@@ -348,6 +359,7 @@ function getDetails(sessionId) {
     snoozed: !!entry.snoozed,
     promptKind: entry.promptKind || null,
     seen: !!entry.seen,
+    stale: !!entry.stale,
     transitionedAt: entry.transitionedAt || null,
     reason: entry.reason || 'No observation recorded yet',
     tailExcerpt: entry.tailExcerpt || null,

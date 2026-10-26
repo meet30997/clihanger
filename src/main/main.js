@@ -58,11 +58,16 @@ function createTray() {
   updateTray();
 }
 
+/** Same set and order as the renderer's "Waiting for you": oldest first, then sidebar order. */
 function getWaitingSessions() {
   const state = store.load();
-  return state.sessions.filter((s) => {
-    return !s.pending && s.tmuxName && status.isWaiting(status.getDetails(s.id));
-  });
+  const projectOrder = new Map(state.projects.map((p, i) => [p.id, i]));
+  const rank = (s) => projectOrder.has(s.projectId) ? projectOrder.get(s.projectId) : state.projects.length;
+  return state.sessions
+    .filter((s) => !s.pending && s.tmuxName && status.isWaiting(status.getDetails(s.id)))
+    .map((s, index) => ({ s, index, since: status.getDetails(s.id).waitingSince || 0 }))
+    .sort((a, b) => a.since - b.since || rank(a.s) - rank(b.s) || a.index - b.index)
+    .map(({ s }) => s);
 }
 
 function updateTray() {
@@ -123,11 +128,11 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate(menuItems));
 }
 
-function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt }) {
+function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, promptKind, seen, stale, reason, tailExcerpt }) {
   // 'gone' is internal only and must not be broadcast to renderer
   if (!status.VALID_STATUSES.has(s)) return;
 
-  broadcast('status:changed', { sessionId, status: s, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt });
+  broadcast('status:changed', { sessionId, status: s, waitingSince, snoozed, promptKind, seen, stale, reason, tailExcerpt });
 
   const waiting = getWaitingSessions().length;
   if (app.dock) app.dock.setBadge(waiting ? String(waiting) : '');
@@ -151,7 +156,9 @@ function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed,
   if (s === 'needs_input') {
     new Notification({ title: 'Agent needs input', body: where }).show();
   } else if (s === 'idle' && prev === 'working') {
-    new Notification({ title: 'Agent finished', body: where }).show();
+    // Idle only means the screen stopped changing without a prompt; it is not
+    // evidence that the agent completed anything.
+    new Notification({ title: 'Agent output stopped', body: `${where} · no prompt detected` }).show();
   }
 }
 

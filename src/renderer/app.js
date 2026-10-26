@@ -22,6 +22,14 @@ function isWaitingStatus(sessionId) {
   return statuses[sessionId] === 'needs_input' && !meta?.snoozed
     && !(meta?.promptKind === 'reply' && meta?.seen);
 }
+
+/** Class list for a status dot; a stale status is the last one observed, not a current one. */
+function statusDotClass(status, meta) {
+  return 'status-dot status-' + status + (meta?.snoozed ? ' snoozed' : '') + (meta?.stale ? ' stale' : '');
+}
+function readableStatus(status, meta) {
+  return status.replace('_', ' ') + (meta?.snoozed ? ' (snoozed)' : '') + (meta?.stale ? ' (not current)' : '');
+}
 const collapsedProjects = new Set();
 try {
   const saved = JSON.parse(localStorage.getItem('hangar.collapsedProjects') || '[]');
@@ -250,7 +258,7 @@ function mountStaticIcons() {
     ['#add-project', 'folderPlus'],
     ['#sidebar-search .icon-slot', 'search'],
     ['#sidebar-collapse', 'sidebar'],
-    ['#sidebar-expand', 'sidebar'],
+    ['#sidebar-expand .icon-slot', 'sidebar'],
     ['#ports-refresh', 'refresh'],
     ['#sidebar-ports .icon-slot', 'activity'],
     ['#inspector-toggle', 'inspector'],
@@ -961,8 +969,9 @@ function showStatusPopover(dotEl) {
       resolvedDetails.snoozed = false;
     }
     const dot = $('#popover-dot');
-    dot.className = 'status-dot status-' + resolvedDetails.status + (resolvedDetails.snoozed ? ' snoozed' : '');
-    $('#popover-title').textContent = ((session && lifecycleLabel(session)) || resolvedDetails.status.replace('_', ' ')) + (resolvedDetails.snoozed ? ' (snoozed)' : '');
+    if (lifecycle) resolvedDetails.stale = false;
+    dot.className = statusDotClass(resolvedDetails.status, resolvedDetails);
+    $('#popover-title').textContent = lifecycle || readableStatus(resolvedDetails.status, resolvedDetails);
 
     let timeText = '';
     if (resolvedDetails.waitingSince && resolvedDetails.status === 'needs_input') {
@@ -1555,31 +1564,31 @@ window.hangar.onTermContextAction(({ sessionId, action, linkUrl }) => {
   }
 });
 
-function updateStatusDot(sessionId, status, snoozed = false) {
+function updateStatusDot(sessionId, status) {
   const sessionEl = $(`.session[data-session-id="${sessionId}"]`);
   if (!sessionEl) return;
   const dot = sessionEl.querySelector('.status-dot');
   if (dot) {
-    dot.className = 'status-dot status-' + status + (snoozed ? ' snoozed' : '');
-    const readableStatus = status.replace('_', ' ') + (snoozed ? ' (snoozed)' : '');
-    dot.setAttribute('aria-label', `Status: ${readableStatus}`);
+    dot.className = statusDotClass(status, statusMetadata[sessionId]);
+    dot.setAttribute('aria-label', `Status: ${readableStatus(status, statusMetadata[sessionId])}`);
     dot.setAttribute('data-session-id', sessionId);
   }
   sessionEl.classList.toggle('attention', isWaitingStatus(sessionId));
 }
 
-window.hangar.onStatusChanged(({ sessionId, status, waitingSince, snoozed, promptKind, seen, reason, tailExcerpt }) => {
+window.hangar.onStatusChanged(({ sessionId, status, waitingSince, snoozed, promptKind, seen, stale, reason, tailExcerpt }) => {
   statuses[sessionId] = status;
   statusMetadata[sessionId] = {
     waitingSince: waitingSince || null,
     snoozed: !!snoozed,
     promptKind: promptKind || null,
     seen: !!seen,
+    stale: !!stale,
     reason: reason || null,
     tailExcerpt: tailExcerpt || null,
   };
   // Fine-grained update in place to avoid destroying typing/inputs (Finding 4.1)
-  updateStatusDot(sessionId, status, snoozed);
+  updateStatusDot(sessionId, status);
   refreshAttention();
   refreshSessionInspector();
   refreshWaitingDurations();
@@ -1598,7 +1607,8 @@ function refreshWaitingDurations() {
     const meta = statusMetadata[id];
     const session = state.sessions.find((row) => row.id === id);
     const waiting = !session?.pending && isWaitingStatus(id) && meta?.waitingSince;
-    el.textContent = waiting ? formatDuration(Math.max(0, Math.floor((Date.now() - meta.waitingSince) / 1000))) : '';
+    el.textContent = waiting ? formatDuration(Math.max(0, Math.floor((Date.now() - meta.waitingSince) / 1000)))
+      + (meta.stale ? ' · not current' : '') : '';
   });
 }
 setInterval(refreshWaitingDurations, 1000);
@@ -1734,6 +1744,10 @@ let attentionSignature = '';
 function refreshAttention() {
   const waiting = waitingSessionsInOrder();
   $('#attention-count').textContent = waiting.length;
+  // With the sidebar hidden, the expand button carries the same count.
+  $('#sidebar-expand-count').hidden = !waiting.length;
+  $('#sidebar-expand-count').textContent = waiting.length;
+  $('#sidebar-expand').setAttribute('aria-label', waiting.length ? `Show sidebar, ${waiting.length} waiting for you` : 'Show sidebar');
   const signature = JSON.stringify([portsView, activeId, waiting.map((s) => [s.id, sessionDisplayName(s), s.agentId])]);
   if (signature === attentionSignature) { refreshWaitingDurations(); return; }
   attentionSignature = signature;
@@ -1785,6 +1799,7 @@ function observedStatus(session) {
   let label = labels[status] || 'Not yet observed';
   if (status === 'needs_input' && meta?.promptKind === 'approval') label = 'Needs approval';
   if (status === 'needs_input' && meta?.promptKind === 'reply' && meta.seen) label = 'Reply seen';
+  if (status && meta?.stale) label += ' · not current';
   return label + (meta?.snoozed ? ' · snoozed' : '');
 }
 
@@ -1799,6 +1814,9 @@ function refreshWorkspaceChrome() {
   $('#sidebar-ports').classList.toggle('active', portsView);
   $('#sidebar-ports').setAttribute('aria-pressed', String(portsView));
   $('#sidebar-ports-count').textContent = portsError ? '?' : portsCheckedAt ? String(portRows.length) : '—';
+  $('#sidebar-ports').classList.toggle('scan-failed', !!portsError);
+  $('#sidebar-ports').setAttribute('aria-label', portsError ? 'Listening Ports, scan unavailable'
+    : portsCheckedAt ? `Listening Ports, ${portRows.length}` : 'Listening Ports, checking');
   $('#running-count').textContent = `${state.sessions.filter((s) => !s.pending && s.tmuxName).length} running`;
   if (portsView) {
     $('#current-title').textContent = 'Listening Ports';
@@ -1884,9 +1902,14 @@ function refreshSessionInspector() {
     : 'Conversation details will appear when the agent identifies the active conversation.';
   $('#inspector-link').textContent = session.conversationId ? 'Change Conversation…' : 'Set Conversation ID…';
   const ports = $('#inspector-ports'); ports.replaceChildren();
+  // A failed scan is unknown, not zero: keep the last observation, say it may be out of date.
   if (portsError) {
-    const unknown = document.createElement('p'); unknown.textContent = 'Port scan unavailable. Could not determine current listeners.'; ports.append(unknown);
-  } else {
+    const unknown = document.createElement('p'); unknown.className = 'inspector-ports-error';
+    unknown.textContent = portsCheckedAt ? 'Port scan unavailable. These are the last known listeners and may be out of date.'
+      : 'Port scan unavailable. Could not determine current listeners.';
+    ports.append(unknown);
+  }
+  if (!portsError || portsCheckedAt) {
     const rows = session.pending ? [] : portRows.filter((r) => r.sessionId === session.id);
     for (const row of rows) {
       const item = document.createElement('div'); item.className = 'inspector-port';
@@ -1894,11 +1917,11 @@ function refreshSessionInspector() {
       num.onclick = () => window.hangar.openUrl(`http://localhost:${row.port}`).catch((err) => showError(err.message));
       const process = document.createElement('span'); process.className = 'port-process'; process.textContent = row.command;
       const pid = document.createElement('small'); pid.textContent = ` · ${row.pid}`; process.append(pid); process.title = `${row.command} · PID ${row.pid}`;
-      const stop = document.createElement('button'); stop.className = 'btn-secondary'; stop.textContent = 'Stop';
+      const stop = document.createElement('button'); stop.className = 'btn-secondary'; stop.textContent = 'Stop'; stop.disabled = !!portsError;
       stop.setAttribute('aria-label', `Stop ${row.command}, process ${row.pid}`); stop.onclick = () => stopPortProcess(row);
       item.append(num, process, stop); ports.append(item);
     }
-    if (!rows.length) { const empty = document.createElement('p'); empty.textContent = !portsCheckedAt ? 'Checking listeners…' : 'No attributed listeners.'; ports.append(empty); }
+    if (!rows.length) { const empty = document.createElement('p'); empty.textContent = !portsCheckedAt ? 'Checking listeners…' : portsError ? 'None in the last scan.' : 'No attributed listeners.'; ports.append(empty); }
   }
   $('#inspector-all-ports').textContent = portsError ? 'All listening ports — scan unavailable…' : `All listening ports${portsCheckedAt ? ` (${portRows.length})` : ''}…`;
   const waiting = waitingSessionsInOrder();
@@ -2326,12 +2349,11 @@ function render() {
       el.setAttribute('role', 'button');
       const st = s.pending ? 'exited' : (statuses[s.id] || 'unknown');
       const meta = statusMetadata[s.id] || {};
-      const isSnoozed = !!meta.snoozed;
+      const dotMeta = s.pending ? {} : meta;
 
       const dot = document.createElement('span');
-      dot.className = 'status-dot status-' + st + (isSnoozed ? ' snoozed' : '');
-      const readableStatus = (lifecycleLabel(s) || st.replace('_', ' ')) + (isSnoozed ? ' (snoozed)' : '');
-      dot.setAttribute('aria-label', `Status: ${readableStatus}`);
+      dot.className = statusDotClass(st, dotMeta);
+      dot.setAttribute('aria-label', `Status: ${lifecycleLabel(s) || readableStatus(st, dotMeta)}`);
       dot.setAttribute('role', 'status');
       dot.setAttribute('data-session-id', s.id);
       dot.tabIndex = 0;
@@ -2602,10 +2624,12 @@ function renderPorts() {
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(row);
   }
-  for (const [id, entries] of [...groups].sort(([a], [b]) => a === 'unattributed' ? 1 : b === 'unattributed' ? -1 : 0)) {
+  // The session you came from leads; unattributed listeners stay last.
+  const groupRank = (id) => id === activeId ? 0 : id === 'unattributed' ? 2 : 1;
+  for (const [id, entries] of [...groups].sort(([a], [b]) => groupRank(a) - groupRank(b))) {
     if (portsGrouped) {
       const heading = document.createElement('div');
-      heading.className = 'port-group-heading';
+      heading.className = 'port-group-heading' + (id === activeId ? ' current' : '');
       const session = state.sessions.find((s) => s.id === id);
       if (session) heading.append(agentIcon(state.agents[session.agentId] || {}));
       const name = document.createElement('span');
@@ -2613,15 +2637,16 @@ function renderPorts() {
       const project = document.createElement('small');
       project.textContent = session ? (entries[0].projectName || 'Unassigned') : 'Could not attribute to a session';
       heading.append(name, project);
+      if (id === activeId) { const tag = document.createElement('span'); tag.className = 'port-current-tag'; tag.textContent = 'Current session'; heading.append(tag); }
       body.append(heading);
     }
     for (const r of entries) {
       const row = document.createElement('div');
-      row.className = 'port-row' + (portKey(r) === selectedPortKey ? ' selected' : '');
+      row.className = 'port-row' + (portKey(r) === selectedPortKey ? ' selected' : '') + (activeId && r.sessionId === activeId ? ' current-session' : '');
       row.tabIndex = 0;
       row.setAttribute('role', 'listitem');
       row.dataset.portKey = portKey(r);
-      row.setAttribute('aria-label', `Port ${r.port}, ${r.command}, process ${r.pid}, ${r.address}`);
+      row.setAttribute('aria-label', `Port ${r.port}, ${r.command}, process ${r.pid}, ${r.address}${activeId && r.sessionId === activeId ? ', current session' : ''}`);
       for (const [value, cls] of [[r.port, 'num'], [r.command, 'cmd'], [r.pid, 'pid'], [r.address, 'address']]) {
         const span = document.createElement('span');
         span.className = cls;
@@ -2670,10 +2695,23 @@ function renderPorts() {
   $('#ports-group-all').setAttribute('aria-pressed', String(!portsGrouped));
 }
 
+/** What stopping a listener's process actually does: the whole process, not the one port. */
+function stopPortMessage(row) {
+  const others = [...new Set(portRows.filter((r) => r.pid === row.pid && r.port !== row.port).map((r) => r.port))];
+  const owner = state.sessions.find((s) => s.id === row.sessionId);
+  return [
+    `This stops the whole process (PID ${row.pid}), not just port ${row.port}.`
+      + (others.length ? ` It also closes port${others.length === 1 ? '' : 's'} ${others.join(', ')}.` : ''),
+    'CliHanger asks it to quit, and force-stops it if it is still running after 2 seconds. Unsaved work in that process is lost.',
+    owner ? `The session “${sessionDisplayName(owner)}” stays open; only this process stops.`
+      : 'This process is not connected to a CliHanger session. Make sure you recognize it before stopping it.',
+  ].join('\n\n');
+}
+
 async function stopPortProcess(row) {
   const { confirmed } = await showModal({
-    title: `Stop ${row.command}?`,
-    message: `Stop process ${row.pid}, which is listening on port ${row.port}? This may close every listener owned by this process.`,
+    title: `Stop ${row.command} on port ${row.port}?`,
+    message: stopPortMessage(row),
     confirmText: 'Stop Process', isDanger: true,
   });
   if (!confirmed) return;
@@ -2941,6 +2979,7 @@ function updateSwitcher(query) {
       lifecycle: lifecycleLabel(s),
       waitingSince: meta.waitingSince || null,
       snoozed: !!meta.snoozed,
+      stale: !s.pending && !!meta.stale,
       waiting: !s.pending && isWaitingStatus(s.id),
       haystack: `${sessionDisplayName(s)} ${s.note ?? ''} ${agent.label} ${project?.name ?? ''} ${s.tmuxName}`.toLowerCase(),
     };
@@ -2994,9 +3033,10 @@ function updateSwitcher(query) {
             sub: res.projectName,
             snippet: res.matches[res.matches.length - 1].line,
             color: agent.color,
-            status: statuses[res.sessionId] || 'idle',
+            status: statuses[res.sessionId] || 'unknown',
             waitingSince: meta.waitingSince || null,
             snoozed: !!meta.snoozed,
+            stale: !!meta.stale,
             waiting: isWaitingStatus(res.sessionId),
           });
         }
@@ -3029,7 +3069,7 @@ function renderSwitcher() {
     setFullContext(el, item.fullContext || item.title);
 
     const dot = document.createElement('span');
-    dot.className = 'status-dot status-' + item.status + (item.snoozed ? ' snoozed' : '');
+    dot.className = statusDotClass(item.status, item);
 
     const title = document.createElement('span');
     title.className = 'sw-title';

@@ -334,7 +334,9 @@ body.sidebar-collapsed #sidebar {
 #current-status, #tree .status-dot { cursor: pointer; }
 #sidebar-expand { display: none; }
 body.sidebar-collapsed #sidebar-collapse { display: none; }
-body.sidebar-collapsed #sidebar-expand { display: inline-flex; }
+body.sidebar-collapsed #sidebar-expand { display: inline-flex; position: relative; }
+#sidebar-expand-count { position: absolute; top: 1px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--status-needs-input); color: #fff; font-size: 10px; font-weight: 600; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+#sidebar-expand-count[hidden] { display: none; }
 body.sidebar-collapsed:not(.fullscreen) #topbar { padding-left: 108px; }
 #inspector-toggle[aria-expanded="true"] { background: var(--panel-hover); color: var(--text); }
 #breadcrumb-pill { display: inline-flex; align-items: center; gap: 5px; width: fit-content; font-size: 12px; color: var(--accent); cursor: pointer; }
@@ -537,6 +539,13 @@ body.sidebar-collapsed:not(.fullscreen) #topbar { padding-left: 108px; }
   opacity: 0.55;
   filter: grayscale(0.5);
 }
+
+/* Last observed status, not a current one: the poll could not read the pane. */
+.status-dot.stale {
+  opacity: 0.5;
+  outline: 1px dashed var(--dim);
+  outline-offset: 1px;
+}
 #no-tmux-banner {
   flex: 0 0 auto;
   background: var(--danger-bg);
@@ -669,6 +678,10 @@ body.inspector-hidden #inspector { display: none; }
 .port-row.selected .port-stop:hover, .port-row.selected .port-stop:focus-visible { background: #ffffff26; color: var(--on-fill); }
 .port-group-heading { display: flex; align-items: center; gap: 8px; padding: 12px 12px 4px; font-size: 12px; font-weight: 600; }
 .port-group-heading small { font-weight: 400; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.port-current-tag { margin-left: auto; flex: 0 0 auto; font-size: 11px; font-weight: 500; color: var(--accent); }
+.port-row.current-session:not(.selected) { box-shadow: inset 2px 0 0 var(--accent); }
+#sidebar-ports.scan-failed #sidebar-ports-count { color: var(--warning); }
+.inspector-ports-error { color: var(--warning); }
 #ports-empty { padding: 20px 12px; color: var(--dim); font-size: 12px; }
 #ports-footer { padding: 10px 20px; border-top: .5px solid var(--line); font-size: 11px; color: var(--dim); }
 #ports-scan-message { padding: 12px 20px; color: var(--warning); font-size: 12px; border-bottom: .5px solid var(--line); }
@@ -818,6 +831,7 @@ body.first-run #welcome-ready { display: flex; flex-direction: column; gap: 14px
 #modal-box { width: 440px; padding: 20px; border-radius: var(--radius-lg); }
 #modal-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
 #modal-body { font-size: 13px; color: var(--dim); line-height: 1.4; margin-bottom: 20px; }
+#modal-body > div:first-child { white-space: pre-line; }
 #modal-body input {
   width: 100%; padding: 8px 10px; margin-top: 10px;
   background: var(--panel-input); border: 1px solid var(--line);
