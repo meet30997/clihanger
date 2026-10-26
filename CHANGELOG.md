@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] — 2026-10-26
+
+### Added
+- **Drag to reorder:** Drag projects and sessions in the sidebar to change their order.
+- **Keyboard session menu:** Shift-F10 or the Menu key opens a session's menu. Arrow keys, Home/End, Return and Escape work inside it.
+
+### Changed
+- **"Waiting for you" stays accurate:** A finished reply you have opened stays out of the list until the agent runs another turn. Screen changes caused by your own typing, resizing or switching are no longer read as agent work. Permission prompts stay listed until you answer them.
+- **Prompt detection:** The agent's own chat prompt is checked first, so Codex's idle placeholder counts as a finished reply, and trust and update menus count as prompts that need an answer.
+- **Dark mode:** Retuned dark palette.
+- **Menu-bar list:** Waiting sessions are listed oldest first, the same order as the sidebar. The collapsed sidebar shows the waiting count on its expand button.
+- **Ports:** The ports view starts with the selected session. The stop dialog says the whole process stops, lists its other ports and says whether a session owns it.
+- **Dialogs:** Dialogs that delete or stop something open with Cancel focused, so Return cancels. Tab stays inside the open dialog, and focus goes back to where you were when it closes.
+
+### Fixed
+- **Stale status:** When a session's screen can't be read, its status is marked as not current instead of being shown as live.
+- **Notifications:** A session going from working to idle no longer claims the agent finished.
+- **Ports scan failure:** A failed scan keeps the last-known session ports, with Stop turned off.
+
 ## [0.3.0] — 2026-10-22
 
 ### Added
