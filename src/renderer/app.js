@@ -349,6 +349,27 @@ function showCopiedIndicator() {
 
 let modalResolve = null;
 
+const FOCUSABLE = 'button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** Keep Tab and Shift-Tab inside an open dialog, skipping hidden and disabled controls. */
+function cycleFocus(event, container) {
+  const controls = [...container.querySelectorAll(FOCUSABLE)]
+    .filter((el) => !el.disabled && el.getClientRects().length);
+  if (!controls.length) return;
+  event.preventDefault();
+  const index = controls.indexOf(document.activeElement);
+  const next = index < 0 ? (event.shiftKey ? controls.length - 1 : 0)
+    : (index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
+  controls[next].focus();
+}
+
+/** Return focus to whatever opened an overlay, unless the closing action already moved it elsewhere. */
+function restoreFocusFrom(container, opener) {
+  const active = document.activeElement;
+  const stranded = !active || active === document.body || container.contains(active);
+  if (stranded && opener?.isConnected && opener.getClientRects().length) opener.focus();
+}
+
 function showModal({ title, message, inputPlaceholder = null, defaultValue = '', confirmText = 'Confirm', cancelText = 'Cancel', isDanger = false, choices = null }) {
   const modal = $('#modal');
   const titleEl = $('#modal-title');
@@ -391,12 +412,15 @@ function showModal({ title, message, inputPlaceholder = null, defaultValue = '',
   cancelBtn.textContent = cancelText;
   confirmBtn.className = isDanger ? 'btn-primary btn-danger' : 'btn-primary';
 
+  const opener = document.activeElement;
   modal.hidden = false;
+  // A destructive action is never the Return default: it takes a deliberate
+  // Tab or click, as in a macOS alert.
   if (inputEl) {
     inputEl.focus();
     inputEl.select?.();
   } else {
-    confirmBtn.focus();
+    (isDanger ? cancelBtn : confirmBtn).focus();
   }
 
   return new Promise((resolve) => {
@@ -404,6 +428,7 @@ function showModal({ title, message, inputPlaceholder = null, defaultValue = '',
       modal.hidden = true;
       const val = inputEl ? inputEl.value.trim() : null;
       modalResolve = null;
+      restoreFocusFrom(modal, opener);
       resolve({ confirmed, value: val });
     };
 
@@ -413,11 +438,7 @@ function showModal({ title, message, inputPlaceholder = null, defaultValue = '',
     modal.onkeydown = (e) => {
       e.stopPropagation();
       if (e.key === 'Tab') {
-        const controls = [inputEl, cancelBtn, confirmBtn].filter(Boolean);
-        const index = controls.indexOf(document.activeElement);
-        const next = (index + (e.shiftKey ? -1 : 1) + controls.length) % controls.length;
-        e.preventDefault();
-        controls[next].focus();
+        cycleFocus(e, modal);
       } else if (e.key === 'Escape' && modalResolve) {
         e.preventDefault();
         modalResolve(false);
@@ -453,9 +474,12 @@ document.addEventListener('contextmenu', (event) => event.preventDefault(), { ca
 document.addEventListener('dragover', (event) => event.preventDefault());
 document.addEventListener('drop', (event) => event.preventDefault());
 
-function showContextMenu(x, y, sessionId) {
+let ctxOpener = null;
+
+function showContextMenu(x, y, sessionId, opener = null) {
   hideIdentityDetail();
   ctxTargetSessionId = sessionId;
+  ctxOpener = opener;
   ctxMenu.style.left = `${Math.min(x, window.innerWidth - 180)}px`;
   ctxMenu.style.top = `${Math.min(y, window.innerHeight - 200)}px`;
 
@@ -472,12 +496,49 @@ function showContextMenu(x, y, sessionId) {
   }
 
   ctxMenu.hidden = false;
+  if (opener) ctxMenuItems()[0]?.focus();
 }
 
 function hideContextMenu() {
+  if (ctxMenu.hidden) return;
   ctxMenu.hidden = true;
   ctxTargetSessionId = null;
+  restoreFocusFrom(ctxMenu, ctxOpener);
+  ctxOpener = null;
 }
+
+const ctxMenuItems = () => [...ctxMenu.querySelectorAll('.ctx-item')].filter((item) => !item.hidden);
+
+/** Open the session menu from the keyboard (⇧F10, or VoiceOver's menu command), under the row. */
+function showContextMenuFor(row, sessionId, event) {
+  if (event?.clientX || event?.clientY) {
+    showContextMenu(event.clientX, event.clientY, sessionId);
+    return;
+  }
+  const rect = row.getBoundingClientRect();
+  showContextMenu(rect.left + 24, rect.bottom, sessionId, row);
+}
+
+// A mouse press must not pull focus out of the terminal; keyboard use moves it in deliberately.
+ctxMenu.addEventListener('mousedown', (e) => e.preventDefault());
+ctxMenu.addEventListener('keydown', (e) => {
+  const items = ctxMenuItems();
+  const index = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    items[(index + step + items.length) % items.length]?.focus();
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    items[e.key === 'Home' ? 0 : items.length - 1]?.focus();
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    document.activeElement?.click();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    hideContextMenu();
+  }
+});
 
 /* ---------- Native Context Menu for Terminal ---------- */
 
@@ -922,11 +983,7 @@ $('#breadcrumb-input')?.addEventListener('keydown', (e) => {
 
 $('#breadcrumb-editor').addEventListener('keydown', (e) => {
   e.stopPropagation();
-  if (e.key !== 'Tab') return;
-  const controls = [$('#breadcrumb-input'), $('#breadcrumb-cancel'), $('#breadcrumb-save')];
-  const index = controls.indexOf(document.activeElement);
-  e.preventDefault();
-  controls[(index + (e.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
+  if (e.key === 'Tab') cycleFocus(e, $('#breadcrumb-editor'));
 });
 
 /* ---------- Status Explanation Popover (F4) ---------- */
@@ -2411,13 +2468,16 @@ function render() {
         if (ke.key === 'Enter' || ke.key === ' ') {
           ke.preventDefault();
           selectSession(s.id);
+        } else if (ke.key === 'ContextMenu' || (ke.key === 'F10' && ke.shiftKey)) {
+          ke.preventDefault();
+          showContextMenuFor(el, s.id);
         }
       };
 
       // Right-click context menu (Finding 4.9)
       el.oncontextmenu = (ce) => {
         ce.preventDefault();
-        showContextMenu(ce.clientX, ce.clientY, s.id);
+        showContextMenuFor(el, s.id, ce);
       };
 
       enableReorder(el, el, 'session', s.id, sessionGroup, sessionIds);
@@ -3158,6 +3218,8 @@ $('#switcher').addEventListener('keydown', (e) => {
 
 /* ---------- Preset Preview & Launch Modal (F3) ---------- */
 
+let presetModalOpener = null;
+
 async function openPresetModal(projectId, presetName) {
   const modal = $('#preset-modal');
   if (!modal) return;
@@ -3175,7 +3237,9 @@ async function openPresetModal(projectId, presetName) {
   launchBtn.disabled = true;
   launchBtn.textContent = 'Launch Preset';
 
+  if (modal.hidden) presetModalOpener = document.activeElement;
   modal.hidden = false;
+  $('#preset-modal-cancel').focus();
   const pendingModal = { projectId, presetName, isLaunching: false };
   activePresetModal = pendingModal;
 
@@ -3332,6 +3396,15 @@ function renderPresetModal() {
     launchBtn.textContent = `Launch Preset (${preview.entries.length})`;
     retryBtn.classList.add('hidden');
   }
+
+  // A button that turns disabled drops focus to the page; keep it in the
+  // dialog on the action that can run next.
+  const modal = $('#preset-modal');
+  const focused = document.activeElement;
+  if (!modal.contains(focused) || focused === $('#preset-modal-cancel')) {
+    const next = [launchBtn, retryBtn].find((btn) => !btn.disabled && btn.getClientRects().length);
+    (next || $('#preset-modal-cancel')).focus();
+  }
 }
 
 async function doLaunchPreset(selectedIndices = null) {
@@ -3386,7 +3459,13 @@ function closePresetModal() {
   const modal = $('#preset-modal');
   if (modal) modal.hidden = true;
   activePresetModal = null;
+  restoreFocusFrom(modal, presetModalOpener);
+  presetModalOpener = null;
 }
+
+$('#preset-modal').addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') cycleFocus(e, $('#preset-modal'));
+});
 
 $('#preset-modal-cancel')?.addEventListener('click', closePresetModal);
 $('#preset-modal-launch')?.addEventListener('click', () => doLaunchPreset());
@@ -3450,6 +3529,8 @@ function updateHandoffInfo() {
   }
 }
 
+let handoffModalOpener = null;
+
 async function openHandoffModal(sessionId) {
   const modal = $('#handoff-modal');
   if (!modal) return;
@@ -3477,7 +3558,9 @@ async function openHandoffModal(sessionId) {
   if (copyBtn) copyBtn.disabled = true;
   if (infoEl) infoEl.textContent = '';
 
+  if (modal.hidden) handoffModalOpener = document.activeElement;
   modal.hidden = false;
+  $('#handoff-modal-cancel').focus();
 
   try {
     const data = await window.hangar.getSessionHandoff(sessionId);
@@ -3531,7 +3614,13 @@ function closeHandoffModal() {
   if (modal) modal.hidden = true;
   activeHandoffSessionId = null;
   currentHandoffRawData = null;
+  restoreFocusFrom(modal, handoffModalOpener);
+  handoffModalOpener = null;
 }
+
+$('#handoff-modal').addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') cycleFocus(e, $('#handoff-modal'));
+});
 
 $('#handoff-modal-cancel')?.addEventListener('click', closeHandoffModal);
 

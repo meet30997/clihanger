@@ -180,7 +180,7 @@
   </div>
 
   <!-- Generic In-App Modal (Confirmation / Branch Input) -->
-  <div id="modal" hidden role="dialog" aria-modal="true">
+  <div id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-body">
     <div id="modal-box">
       <div id="modal-title"></div>
       <div id="modal-body"></div>
@@ -242,13 +242,13 @@
   </div>
 
   <!-- Context Menu for Sidebar Sessions -->
-  <div id="context-menu" hidden>
-    <div class="ctx-item" id="ctx-note">Edit Task Note…</div>
-    <div class="ctx-item" id="ctx-conv">Link Conversation ID (Advanced)…</div>
-    <div class="ctx-item" id="ctx-snooze">Snooze Attention</div>
-    <div class="ctx-item" id="ctx-handoff">Copy Handoff…</div>
-    <div class="ctx-item" id="ctx-rename">Rename Session</div>
-    <div class="ctx-item" id="ctx-kill">Close Session</div>
+  <div id="context-menu" hidden role="menu" aria-label="Session actions">
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-note">Edit Task Note…</div>
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-conv">Link Conversation ID (Advanced)…</div>
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-snooze">Snooze Attention</div>
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-handoff">Copy Handoff…</div>
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-rename">Rename Session</div>
+    <div class="ctx-item" role="menuitem" tabindex="-1" id="ctx-kill">Close Session</div>
   </div>
 
   <!-- Status Explanation Inspection Card (F4) -->

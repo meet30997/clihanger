@@ -1016,14 +1016,14 @@ body.first-run #welcome-ready { display: flex; flex-direction: column; gap: 14px
   padding: 6px 14px; font-size: 12px; color: var(--text-soft);
   cursor: pointer; transition: background 0.1s;
 }
-.ctx-item:hover { background: var(--selected); color: var(--on-fill); }
+.ctx-item:hover, .ctx-item:focus { background: var(--selected); color: var(--on-fill); outline: none; }
 .ctx-item#ctx-kill {
   border-top: 1px solid var(--line-soft);
   margin-top: 3px;
   padding-top: 7px;
   color: var(--dim);
 }
-.ctx-item#ctx-kill:hover {
+.ctx-item#ctx-kill:hover, .ctx-item#ctx-kill:focus {
   background: var(--danger-bg);
   color: var(--danger);
 }
