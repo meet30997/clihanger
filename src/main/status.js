@@ -120,6 +120,11 @@ async function classify(session) {
   const h = hash(screen.trimEnd());
   const prev = memory.get(session.id) || { hash: null, unchanged: 0 };
 
+  // Nothing to compare the first screen with, so it is not evidence of work.
+  if (!prev.hash) {
+    return { status: 'working', hash: h, unchanged: 0, first: true, reason: 'First observation; awaiting output stability (~4s)' };
+  }
+
   if (h !== prev.hash) {
     if (prev.status && prev.userActivityAt && Date.now() - prev.userActivityAt < USER_ECHO_MS) {
       return {
@@ -132,7 +137,7 @@ async function classify(session) {
         excerpt: prev.tailExcerpt,
       };
     }
-    return { status: 'working', hash: h, unchanged: 0, reason: 'Terminal screen content updated' };
+    return { status: 'working', hash: h, unchanged: 0, changed: true, reason: 'Terminal screen content updated' };
   }
 
   const unchanged = prev.unchanged + 1;
@@ -223,13 +228,17 @@ function start(onChange, onGone) {
         snoozed,
         promptKind: status === 'needs_input' ? (res.promptKind || null) : null,
         // Only real agent work makes a seen reply new again.
-        seen: status === 'working' && !res.echo ? false : !!entry.seen,
+        seen: status === 'working' && !res.echo && !res.first ? false : !!entry.seen,
+        // Until the screen is seen changing, leaving the first observation is
+        // not a transition worth a notification (ADR-082).
+        baseline: !!res.first || (!!entry.baseline && !res.changed),
         stale: false,
         reason: res.reason,
         tailExcerpt: res.excerpt || null,
         source: 'poll',
       };
       markSeenIfViewed(session.id, newEntry);
+      markSeenIfUnused(newEntry);
       memory.set(session.id, newEntry);
 
       if (status === 'gone') {
@@ -276,12 +285,14 @@ function setStatus(sessionId, newStatus, onChange, reason = 'Reported via hook')
     // A hook does not say whether it is reporting a finished turn or a question.
     promptKind: null,
     seen: newStatus === 'working' ? false : !!entry.seen,
+    baseline: false,
     stale: false,
     reason,
     tailExcerpt: null,
     source: 'hook',
   };
   markSeenIfViewed(sessionId, newEntry);
+  markSeenIfUnused(newEntry);
   memory.set(sessionId, newEntry);
   if (entry.status !== newStatus || !!entry.seen !== newEntry.seen || !!entry.stale) {
     if (onChange) onChange(changePayload(sessionId, newEntry, prev));
@@ -300,6 +311,17 @@ function markSeenIfViewed(sessionId, entry) {
   }
 }
 
+/**
+ * A session started in this run that you have not sent anything yet is not
+ * waiting for you: its empty prompt is not a reply (ADR-082). Questions are.
+ */
+function markSeenIfUnused(entry) {
+  if (!entry.fresh) return;
+  if (entry.status === 'idle' || (entry.status === 'needs_input' && entry.promptKind === 'reply')) {
+    entry.seen = true;
+  }
+}
+
 function changePayload(sessionId, entry, prev) {
   return {
     sessionId,
@@ -310,6 +332,7 @@ function changePayload(sessionId, entry, prev) {
     promptKind: entry.promptKind || null,
     seen: !!entry.seen,
     stale: !!entry.stale,
+    baseline: !!entry.baseline,
     reason: entry.reason,
     tailExcerpt: entry.tailExcerpt || null,
   };
@@ -325,6 +348,17 @@ function isWaiting(entry) {
 function noteUserActivity(sessionId) {
   const entry = memory.get(sessionId);
   if (entry) entry.userActivityAt = Date.now();
+}
+
+/** The session was started in this run; it stays unused until your first turn. */
+function noteFresh(sessionId) {
+  memory.set(sessionId, { ...(memory.get(sessionId) || {}), fresh: true });
+}
+
+/** You submitted input to the session, so what it does next is for you. */
+function noteUserTurn(sessionId) {
+  const entry = memory.get(sessionId);
+  if (entry) entry.fresh = false;
 }
 
 /** Record which session is on screen (null: none, or the window is not focused). */
@@ -385,6 +419,8 @@ module.exports = {
   setStatus,
   setViewer,
   noteUserActivity,
+  noteFresh,
+  noteUserTurn,
   isWaiting,
   snooze,
   getDetails,

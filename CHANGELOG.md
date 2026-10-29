@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Notifications:** A session sends one notification per wait, not one each time its screen repaints. A new session sitting at its empty prompt no longer notifies or counts as waiting until you send it something. Relaunching the app no longer notifies about every session that is already at a prompt.
+
+### Changed
+- **Notifications:** Clicking a notification opens its session. Titles say whether the agent needs approval or is waiting for your reply. Opening, answering, snoozing or closing a session removes its notification.
+
 ## [0.4.0] — 2026-10-26
 
 ### Added

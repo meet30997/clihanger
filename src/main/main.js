@@ -101,13 +101,7 @@ function updateTray() {
       const title = s.title || s.autoTitle || agent?.label || s.agentId;
       menuItems.push({
         label: `  🟡 ${title} (${proj?.name ?? 'unassigned'})`,
-        click: () => {
-          if (!win || win.isDestroyed()) createWindow();
-          else { win.show(); win.focus(); }
-          // `focusSession` is the only thing that moves the renderer's
-          // selection, and only a deliberate act like this menu click sets it.
-          broadcast('state:changed', { ...getStateWithTmux(), focusSession: s.id });
-        },
+        click: () => showSession(s.id),
       });
     }
     menuItems.push({ type: 'separator' });
@@ -128,7 +122,32 @@ function updateTray() {
   tray.setContextMenu(Menu.buildFromTemplate(menuItems));
 }
 
-function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, promptKind, seen, stale, reason, tailExcerpt }) {
+function showSession(sessionId) {
+  if (!win || win.isDestroyed()) createWindow();
+  else { win.show(); win.focus(); }
+  // `focusSession` is the only thing that moves the renderer's selection, and
+  // only a deliberate act like a tray or notification click sets it.
+  broadcast('state:changed', { ...getStateWithTmux(), focusSession: sessionId });
+}
+
+// One desktop notification per wait: sessionId → { notification, kind }. Held
+// so the click handler is not collected, and so the next one replaces it.
+const notified = new Map();
+
+/** You looked at or answered the session: its notification is done with. */
+function acknowledgeNotification(sessionId) {
+  const entry = notified.get(sessionId);
+  if (!entry) return;
+  notified.delete(sessionId);
+  try { entry.notification.close(); } catch {}
+}
+
+const NOTIFICATION_TITLES = {
+  approval: 'Agent needs approval',
+  reply: 'Agent is waiting for your reply',
+};
+
+function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed, promptKind, seen, stale, baseline, reason, tailExcerpt }) {
   // 'gone' is internal only and must not be broadcast to renderer
   if (!status.VALID_STATUSES.has(s)) return;
 
@@ -138,31 +157,50 @@ function handleStatusChange({ sessionId, status: s, prev, waitingSince, snoozed,
   if (app.dock) app.dock.setBadge(waiting ? String(waiting) : '');
   updateTray();
 
-  // only notify on meaningful transitions, and never on first classification
-  if (!prev || prev === s) return;
+  // Only notify on meaningful transitions: not the first look at a session's
+  // screen, and not the settle that follows it before any output (ADR-082).
+  if (!prev || prev === s || baseline) return;
   if (snoozed || seen) return;
+  if (s === 'needs_input') {
+    if (promptKind === 'reply' && notified.has(sessionId)) return;
+  } else if (s === 'idle' && prev === 'working') {
+    if (notified.has(sessionId)) return;
+  } else {
+    return;
+  }
+  // A question may follow an unanswered reply; nothing repeats a question.
+  if (notified.get(sessionId)?.kind === 'approval') return;
 
   const state = store.load();
   const session = state.sessions.find((x) => x.id === sessionId);
   if (!session) return;
 
+  // The same "on screen" the status module uses to mark a session seen.
+  if (viewingSessionId === sessionId && windowFocused()) return;
+
   const project = state.projects.find((p) => p.id === session.projectId);
   const agent = agents.loadAgents()[session.agentId];
   const where = `${agent?.label ?? session.agentId} · ${project?.name ?? 'unassigned'}`;
 
-  // don't notify about the session you're already looking at
-  if (state.lastActiveSessionId === sessionId && win?.isFocused()) return;
-
+  let notification;
   if (s === 'needs_input') {
-    new Notification({ title: 'Agent needs input', body: where }).show();
-  } else if (s === 'idle' && prev === 'working') {
+    notification = new Notification({ title: NOTIFICATION_TITLES[promptKind] || 'Agent needs input', body: where });
+  } else {
     // Idle only means the screen stopped changing without a prompt; it is not
     // evidence that the agent completed anything.
-    new Notification({ title: 'Agent output stopped', body: `${where} · no prompt detected` }).show();
+    notification = new Notification({ title: 'Agent output stopped', body: `${where} · no prompt detected` });
   }
+  acknowledgeNotification(sessionId);
+  notification.on('click', () => {
+    acknowledgeNotification(sessionId);
+    showSession(sessionId);
+  });
+  notified.set(sessionId, { notification, kind: s === 'needs_input' ? (promptKind || 'approval') : 'idle' });
+  notification.show();
 }
 
-async function handleGoneSession() {
+async function handleGoneSession(sessionId) {
+  acknowledgeNotification(sessionId);
   try {
     await sessions.reconcile();
     broadcast('state:changed', getStateWithTmux());
@@ -251,8 +289,12 @@ function createWindow() {
 // The session whose terminal the renderer shows; it counts as seen only while
 // the window is focused.
 let viewingSessionId = null;
+function windowFocused() {
+  return !!win && !win.isDestroyed() && win.isFocused() && win.isVisible();
+}
 function syncViewer() {
-  const focused = win && !win.isDestroyed() && win.isFocused() && win.isVisible();
+  const focused = windowFocused();
+  if (focused && viewingSessionId) acknowledgeNotification(viewingSessionId);
   status.setViewer(focused ? viewingSessionId : null, handleStatusChange);
 }
 
@@ -655,7 +697,8 @@ handleChecked('session:move', async (_e, { sessionId, beforeSessionId }) => {
 });
 
 handleChecked('session:create', async (_e, { projectId, agentId, branch }) => {
-  await sessions.createSession({ projectId, agentId, branch });
+  const { createdSessionId } = await sessions.createSession({ projectId, agentId, branch });
+  status.noteFresh(createdSessionId);
   const state = getStateWithTmux();
   broadcast('state:changed', state);
   return state;
@@ -681,6 +724,7 @@ handleChecked('session:conversation', async (_e, { sessionId, conversationId }) 
 
 handleChecked('status:snooze', async (_e, { sessionId, snoozed }) => {
   const ok = status.snooze(sessionId, snoozed, handleStatusChange);
+  if (snoozed) acknowledgeNotification(sessionId);
   const waiting = getWaitingSessions().length;
   if (app.dock) app.dock.setBadge(waiting ? String(waiting) : '');
   updateTray();
@@ -700,6 +744,7 @@ handleChecked('session:handoff', async (_e, { sessionId, lines }) => {
 });
 
 handleChecked('session:kill', async (_e, { sessionId }) => {
+  acknowledgeNotification(sessionId);
   const state = getStateWithTmux(await sessions.killSession(sessionId));
   broadcast('state:changed', state);
   return state;
@@ -723,6 +768,7 @@ handleChecked('preset:preview', async (_e, { projectId, presetName }) => {
 
 handleChecked('preset:launch', async (_e, { projectId, presetName, selectedIndices }) => {
   const result = await sessions.launchPreset({ projectId, presetName, selectedIndices });
+  for (const { sessionId } of result.successful || []) status.noteFresh(sessionId);
   result.state = getStateWithTmux(result.state);
   const state = getStateWithTmux();
   broadcast('state:changed', state);
@@ -741,6 +787,7 @@ handleChecked('term:open', async (_e, { sessionId, cols, rows, resume }) => {
   if (session.pending) {
     try {
       session = await sessions.startSession(sessionId, { resume: !!resume });
+      status.noteFresh(sessionId);
     } catch (err) {
       console.error('Failed to start parked session:', err.message);
       return { ok: false, error: err.message };
@@ -779,6 +826,10 @@ handleChecked('session:viewing', (_e, { sessionId }) => {
 handleChecked('term:input', (_e, { sessionId, data, chatTitle }) => {
   // Typing repaints the input line; Enter starts a turn, which is real work.
   if (!/[\r\n]/.test(data)) status.noteUserActivity(sessionId);
+  else {
+    status.noteUserTurn(sessionId);
+    acknowledgeNotification(sessionId);
+  }
   ptyman.write(sessionId, data);
   chatTitles.acceptInputTitle(sessionId, data, chatTitle);
   if (/[\r\n]/.test(data)) chatTitles.schedule(sessionId);
