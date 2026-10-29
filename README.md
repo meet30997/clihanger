@@ -63,7 +63,7 @@ Building from source also needs:
 
 ## Download (Apple Silicon)
 
-1. Download **CliHanger-0.4.0-arm64.zip** from the [latest release](https://github.com/meet30997/clihanger/releases/latest) and unzip it.
+1. Download **CliHanger-0.4.1-arm64.zip** from the [latest release](https://github.com/meet30997/clihanger/releases/latest) and unzip it.
 2. Move `CliHanger.app` to `/Applications`.
 3. Open it. The build is ad-hoc signed, not notarized, so macOS blocks the first launch:
    - **macOS 15 or later:** open **System Settings → Privacy & Security**, scroll to the message about CliHanger, click **Open Anyway**, and confirm.
@@ -71,7 +71,7 @@ Building from source also needs:
 
    Or clear the quarantine flag in Terminal instead: `xattr -dr com.apple.quarantine /Applications/CliHanger.app`
 
-The release notes list the SHA-256 checksum of the zip. You can compare it with `shasum -a 256 CliHanger-0.4.0-arm64.zip`.
+The release notes list the SHA-256 checksum of the zip. You can compare it with `shasum -a 256 CliHanger-0.4.1-arm64.zip`.
 
 ---
 
