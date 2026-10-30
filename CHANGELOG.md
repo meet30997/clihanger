@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] — 2026-10-30
+
+### Added
+- **Help & Shortcuts:** A built-in guide with a quick tour and a full keyboard shortcut list. Open it from **Help** in the sidebar, the welcome screen, the **Help** menu, or with ⌘/.
+- **Close all sessions in a project:** The × on a project row closes every session in that project after one confirmation. The project stays in the sidebar.
+
+### Changed
+- **Sidebar:** "Waiting for you" and "Projects" are now labelled sections with dividers.
+
+### Fixed
+- **Closing sessions:** Output that arrives while a session is closing no longer brings its terminal back.
+
 ## [0.4.1] — 2026-10-29
 
 ### Fixed
