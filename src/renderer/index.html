@@ -20,16 +20,20 @@
           <span class="nav-label">Listening Ports</span>
           <span id="sidebar-ports-count">—</span>
         </button>
-        <section id="attention" aria-label="Waiting for you">
-          <div class="section-heading"><span>Waiting for you</span><span id="attention-count" aria-live="polite">0</span></div>
+        <section id="attention" class="sidebar-section" aria-labelledby="attention-heading">
+          <div class="section-heading"><h2 id="attention-heading">Waiting for you</h2><span id="attention-count" aria-live="polite">0</span></div>
           <div id="attention-list"></div>
         </section>
-        <nav id="tree" aria-label="Projects and sessions"></nav>
+        <section id="projects" class="sidebar-section" aria-labelledby="projects-heading">
+          <div class="section-heading"><h2 id="projects-heading">Projects</h2></div>
+          <nav id="tree" aria-label="Projects and sessions"></nav>
+        </section>
       </div>
       <footer id="sidebar-footer">
         <button id="add-project" class="icon-button" title="Add project (⌘O)" aria-label="Add project"></button>
         <button id="sidebar-search" class="icon-button" title="Find a session (⌘P)" aria-label="Find a session (⌘P)"><span class="icon-slot" aria-hidden="true"></span></button>
         <span id="running-count">0 running</span>
+        <button id="sidebar-help" class="help-button" title="Help & Shortcuts (⌘/)" aria-haspopup="dialog"><span class="icon-slot" aria-hidden="true"></span>Help</button>
       </footer>
     </aside>
     <div id="sidebar-resizer" role="separator" tabindex="0" aria-label="Sidebar width"
@@ -83,6 +87,7 @@
             <h1 class="empty-title">A home for your CLI work.</h1>
             <p class="empty-desc">Keep your terminals and coding agents together, organized by project.</p>
             <button id="empty-add-project" class="btn-primary">Choose Project Folder…</button>
+            <button id="empty-help" class="text-button" aria-haspopup="dialog">Learn how CliHanger works</button>
           </div>
           <aside id="welcome-ready" aria-label="Workspace setup">
             <h2>Configured on this Mac</h2>
@@ -161,6 +166,64 @@
       </div>
     </main>
   </div>
+
+  <dialog id="help-dialog" aria-labelledby="help-title" aria-describedby="help-description">
+    <header class="help-header">
+      <div><h1 id="help-title">Help & Shortcuts</h1><p id="help-description">Your projects, terminals, and coding agents in one place.</p></div>
+      <button id="help-close" class="icon-button" aria-label="Close help" autofocus><span class="icon-slot" aria-hidden="true"></span></button>
+    </header>
+    <div class="help-tabs" role="tablist" aria-label="Help topics">
+      <button id="help-start-tab" role="tab" aria-selected="true" aria-controls="help-start">Getting started</button>
+      <button id="help-keys-tab" role="tab" aria-selected="false" aria-controls="help-keys" tabindex="-1">Keyboard shortcuts</button>
+    </div>
+    <div class="help-content">
+      <section id="help-start" role="tabpanel" aria-labelledby="help-start-tab" tabindex="0">
+        <h2>A quick tour of your workspace</h2>
+        <ol class="help-steps">
+          <li><div><h3>Choose a project folder</h3><p>Use the folder button at the bottom of the sidebar, or press <kbd>⌘O</kbd>. Each project keeps its sessions together.</p></div></li>
+          <li><div><h3>Start a terminal or agent</h3><p>Use <strong>+</strong> beside a project to pick a configured CLI. Agents need to be installed and signed in on your Mac.</p></div></li>
+          <li><div><h3>Move between sessions</h3><p>Select a session in the sidebar, or use <kbd>⌘P</kbd> to search sessions and their terminal history. The inspector shows the selected session’s details and task note.</p></div></li>
+        </ol>
+        <div class="help-topics">
+          <section><h3>Waiting for you</h3><p>Find unread replies and prompts that need your input here. Use <kbd>⇧⌘J</kbd> to jump to the next waiting session. Select a status dot for the observation behind it; detection can be imperfect.</p></section>
+          <section><h3>Listening Ports</h3><p>See local servers and the sessions they belong to. <strong>Unknown ownership</strong> means a process could not be linked to a session. <strong>Stop</strong> ends the whole process, including every port it serves.</p></section>
+          <section><h3>Keep your place</h3><p>Rename a session or add a task note from the inspector. Right-click a session for more actions, including snoozing attention and copying a handoff.</p></section>
+          <section><h3>Configure your agents</h3><p>Choose <strong>Help → Open Config Folder</strong> in the macOS menu bar, then edit <code>agents.json</code> to add or customize agent commands.</p></section>
+        </div>
+        <aside class="help-callout"><h3>When you quit</h3><p>Quitting CliHanger or closing its last window stops all managed sessions and their processes. Saved sessions remain in the sidebar for reopening; conversation resume depends on the agent.</p></aside>
+      </section>
+      <section id="help-keys" role="tabpanel" aria-labelledby="help-keys-tab" tabindex="0" hidden>
+        <p class="help-key-intro">These shortcuts belong to CliHanger. Your shell and agent CLI also have their own shortcuts.</p>
+        <div class="help-shortcut-grid">
+          <section><h2>Workspace</h2><dl class="help-shortcuts">
+            <div><dt>Add project</dt><dd><kbd>⌘O</kbd></dd></div>
+            <div><dt>New session in current project</dt><dd><kbd>⇧⌘N</kbd></dd></div>
+            <div><dt>Find a session</dt><dd><kbd>⌘P</kbd></dd></div>
+            <div><dt>Jump to session in sidebar order</dt><dd><kbd>⌘1–9</kbd></dd></div>
+            <div><dt>Next waiting session</dt><dd><kbd>⇧⌘J</kbd></dd></div>
+            <div><dt>Show or hide sidebar</dt><dd><kbd>⌘B</kbd></dd></div>
+            <div><dt>Open help</dt><dd><kbd>⌘/</kbd></dd></div>
+          </dl></section>
+          <section><h2>Terminal</h2><dl class="help-shortcuts">
+            <div><dt>Find in current terminal</dt><dd><kbd>⌘F</kbd></dd></div>
+            <div><dt>Next / previous find match</dt><dd><kbd>↵</kbd> / <kbd>⇧↵</kbd></dd></div>
+            <div><dt>Clear terminal screen and history</dt><dd><kbd>⌘K</kbd></dd></div>
+            <div><dt>Copy selection / paste</dt><dd><kbd>⌘C</kbd> / <kbd>⌘V</kbd></dd></div>
+            <div><dt>Insert a newline</dt><dd><kbd>⇧↵</kbd> / <kbd>⌃↵</kbd></dd></div>
+            <div><dt>Increase / decrease text size</dt><dd><kbd>⌘+</kbd> / <kbd>⌘−</kbd></dd></div>
+            <div><dt>Reset text size</dt><dd><kbd>⌘0</kbd></dd></div>
+          </dl></section>
+          <section class="help-organize"><h2>Organize with the keyboard</h2><dl class="help-shortcuts">
+            <div><dt>Move focused project or session up / down</dt><dd><kbd>⌥⌘↑</kbd> / <kbd>⌥⌘↓</kbd></dd></div>
+            <div><dt>Resize focused sidebar divider</dt><dd><kbd>←</kbd> / <kbd>→</kbd></dd></div>
+            <div><dt>Close a dialog or search</dt><dd><kbd>esc</kbd></dd></div>
+          </dl></section>
+        </div>
+        <p class="help-key-note">Selecting terminal text copies it automatically. Option-drag selects text locally when a CLI handles mouse input. With no active terminal, <kbd>⌘K</kbd> opens the session switcher.</p>
+      </section>
+    </div>
+    <footer class="help-footer"><span>⌘ Command <span aria-hidden="true">·</span> ⌥ Option <span aria-hidden="true">·</span> ⇧ Shift <span aria-hidden="true">·</span> ⌃ Control</span><button id="help-done" class="btn-secondary">Done</button></footer>
+  </dialog>
 
   <!-- Quick Switcher -->
   <div id="switcher" hidden role="dialog" aria-modal="true" aria-label="Quick Switcher">

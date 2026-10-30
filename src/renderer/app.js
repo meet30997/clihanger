@@ -245,6 +245,7 @@ const ICONS = {
   chat:         '<path d="M3 4.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H6l-3 2.5v-9.5a1 1 0 0 1 1-1z"/>',
   check:        '<path d="M3.5 8.5l3 3 6-6"/>',
   stop:         '<rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.5"/>',
+  help:         '<circle cx="8" cy="8" r="6"/><path d="M6.25 6a1.75 1.75 0 1 1 2.7 1.45C8.2 7.9 8 8.2 8 9"/><path d="M8 11h.01"/>',
 };
 
 function iconSvg(name, extraClass = '') {
@@ -257,6 +258,8 @@ function mountStaticIcons() {
   const slots = [
     ['#add-project', 'folderPlus'],
     ['#sidebar-search .icon-slot', 'search'],
+    ['#sidebar-help .icon-slot', 'help'],
+    ['#help-close .icon-slot', 'close'],
     ['#sidebar-collapse', 'sidebar'],
     ['#sidebar-expand .icon-slot', 'sidebar'],
     ['#ports-refresh', 'refresh'],
@@ -354,7 +357,7 @@ const FOCUSABLE = 'button, input, select, textarea, [tabindex]:not([tabindex="-1
 /** Keep Tab and Shift-Tab inside an open dialog, skipping hidden and disabled controls. */
 function cycleFocus(event, container) {
   const controls = [...container.querySelectorAll(FOCUSABLE)]
-    .filter((el) => !el.disabled && el.getClientRects().length);
+    .filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
   if (!controls.length) return;
   event.preventDefault();
   const index = controls.indexOf(document.activeElement);
@@ -458,6 +461,87 @@ window.addEventListener('keydown', (e) => {
     modalResolve(false);
   }
 });
+
+/* ---------- Help ---------- */
+
+const helpDialog = $('#help-dialog');
+const helpTabs = [...helpDialog.querySelectorAll('[role="tab"]')];
+let helpOpener = null;
+
+function selectHelpTab(tab) {
+  for (const item of helpTabs) {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+  }
+  helpDialog.querySelector('.help-content').scrollTop = 0;
+}
+
+function openHelp() {
+  if (helpDialog.open) return;
+  // Keep existing dialogs intact; Help must not cover a pending decision.
+  if (modalResolve || !$('#preset-modal').hidden || !$('#handoff-modal').hidden
+    || !$('#breadcrumb-editor').classList.contains('hidden')) return;
+  helpOpener = document.activeElement;
+  selectHelpTab(helpTabs[0]);
+  helpDialog.showModal();
+}
+
+function closeHelp() {
+  if (!helpDialog.open) return;
+  helpDialog.close();
+  restoreFocusFrom(helpDialog, helpOpener);
+  helpOpener = null;
+}
+
+$('#sidebar-help').addEventListener('click', openHelp);
+$('#empty-help').addEventListener('click', openHelp);
+$('#help-close').addEventListener('click', closeHelp);
+$('#help-done').addEventListener('click', closeHelp);
+helpDialog.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeHelp();
+});
+window.addEventListener('hangar:help', openHelp);
+for (const tab of helpTabs) tab.addEventListener('click', () => selectHelpTab(tab));
+helpDialog.querySelector('[role="tablist"]').addEventListener('keydown', (event) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const index = helpTabs.indexOf(document.activeElement);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? helpTabs.length - 1
+    : (index + (event.key === 'ArrowRight' ? 1 : -1) + helpTabs.length) % helpTabs.length;
+  selectHelpTab(helpTabs[next]);
+  helpTabs[next].focus();
+});
+
+// Capture before application shortcuts and Escape handlers. Native <dialog>
+// makes the workspace inert; the close handler restores the opener's focus.
+window.addEventListener('keydown', (event) => {
+  const helpShortcut = event.metaKey && !event.ctrlKey && !event.altKey
+    && !event.shiftKey && event.key === '/';
+  if (!helpDialog.open) {
+    if (helpShortcut) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openHelp();
+    }
+    return;
+  }
+  if (event.key === 'Escape' || helpShortcut) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeHelp();
+  } else if (event.metaKey || event.ctrlKey) {
+    // Selection/copy and the system quit/hide/minimize/close shortcuts stay
+    // available in the guide; workspace actions stay put.
+    if (!['a', 'c', 'q', 'h', 'm', 'w'].includes(event.key.toLowerCase())) event.preventDefault();
+    event.stopImmediatePropagation();
+  } else if (event.key === 'Tab') {
+    cycleFocus(event, helpDialog);
+    event.stopImmediatePropagation();
+  }
+}, { capture: true });
 
 /* ---------- Context Menu for Sidebar ---------- */
 
@@ -1580,6 +1664,7 @@ const LOCALHOST_PORT_REGEX = /(?:https?:\/\/)?(?:localhost|127\.0\.0\.1):(\d{2,5
 let portScanDebounce = null;
 
 window.hangar.onTermData(({ sessionId, data }) => {
+  if (closingSessions.has(sessionId) || !state.sessions.some((s) => s.id === sessionId)) return;
   // create the terminal if data arrives before we've rendered it
   getTerm(sessionId).term.write(data);
   if (pendingScrollStateChecks.delete(sessionId)) {
@@ -2265,6 +2350,19 @@ function render() {
       };
       actions.appendChild(launchBtn);
 
+      const closeAllBtn = document.createElement('button');
+      closeAllBtn.className = 'project-close-btn';
+      closeAllBtn.title = `Close all sessions in ${g.project.name}`;
+      closeAllBtn.setAttribute('aria-label', closeAllBtn.title);
+      closeAllBtn.dataset.sidebarFocus = `close-all:${g.project.id}`;
+      closeAllBtn.disabled = !g.sessions.length || closingProjects.has(g.project.id);
+      closeAllBtn.innerHTML = iconSvg('close', 'icon-sm');
+      closeAllBtn.onclick = (e) => {
+        e.stopPropagation();
+        confirmCloseProjectSessions(g.project.id);
+      };
+      actions.appendChild(closeAllBtn);
+
       row.appendChild(actions);
       enableReorder(row, wrap, 'project', g.project.id, 'projects', projectIds);
     }
@@ -2791,33 +2889,75 @@ $('#inspector-all-ports').onclick = showPorts;
 
 /* ---------- Session Lifecycle & Termination ---------- */
 
-async function terminateSession(dyingId) {
+const closingProjects = new Set();
+const closingSessions = new Set();
+
+async function confirmCloseProjectSessions(projectId) {
+  if (modalResolve || closingProjects.has(projectId)) return;
+  const project = state.projects.find((p) => p.id === projectId);
+  const sessions = state.sessions.filter((s) => s.projectId === projectId);
+  if (!project || !sessions.length) return;
+  closingProjects.add(projectId);
   try {
-    await window.hangar.termClose(dyingId);
-  } catch {}
-  terms.get(dyingId)?.term.dispose();
-  terms.get(dyingId)?.el.remove();
-  terms.delete(dyingId);
-  wheelRemainders.delete(dyingId);
-  terminalScrollStates.delete(dyingId);
-  terminalSelections.delete(dyingId);
-  pendingScrollStateChecks.delete(dyingId);
-  clearTimeout(scrollStateRefreshTimers.get(dyingId));
-  scrollStateRefreshTimers.delete(dyingId);
-  hoveredTerminalLinks.delete(dyingId);
-
-  state = await window.hangar.killSession(dyingId);
-  if (state.lastWarning) {
-    showError(state.lastWarning);
+    const { confirmed } = await showModal({
+      title: 'Close All Sessions',
+      message: `Close all ${sessions.length} session${sessions.length === 1 ? '' : 's'} in "${project.name}"? Running processes will stop and stopped sessions will be removed. Unsaved work may be lost. The project will stay in the sidebar.`,
+      confirmText: 'Close All Sessions',
+      isDanger: true,
+    });
+    if (!confirmed) return;
+    render();
+    const failures = [];
+    // Use the confirmed snapshot, serially: each kill reconciles and saves state.
+    // Sessions added later or moved to another project are left alone.
+    for (const session of sessions) {
+      if (!state.sessions.some((s) => s.id === session.id && s.projectId === projectId)) continue;
+      try { await terminateSession(session.id); }
+      catch (err) { failures.push(`${sessionDisplayName(session)}: ${err.message}`); }
+    }
+    if (failures.length) showError(`Could not close ${failures.length} session${failures.length === 1 ? '' : 's'}: ${failures.join('; ')}`);
+  } finally {
+    closingProjects.delete(projectId);
+    render();
+    const projectRow = [...$('#tree').querySelectorAll('.project')]
+      .find((el) => el.dataset.projectId === projectId);
+    const closeButton = projectRow?.querySelector('.project-close-btn:not(:disabled)');
+    (closeButton || projectRow?.querySelector('.project-toggle'))?.focus();
   }
+}
 
-  // Closing a session selects nothing. Promoting a neighbour attaches a
-  // terminal the user did not ask for, and on a row they may not even have been
-  // looking at — closing a background session used to yank the view sideways.
-  // Only the session that was on screen loses its selection.
-  if (activeId === dyingId) activeId = null;
+async function terminateSession(dyingId) {
+  closingSessions.add(dyingId);
+  try {
+    try {
+      await window.hangar.termClose(dyingId);
+    } catch {}
+    terms.get(dyingId)?.term.dispose();
+    terms.get(dyingId)?.el.remove();
+    terms.delete(dyingId);
+    wheelRemainders.delete(dyingId);
+    terminalScrollStates.delete(dyingId);
+    terminalSelections.delete(dyingId);
+    pendingScrollStateChecks.delete(dyingId);
+    clearTimeout(scrollStateRefreshTimers.get(dyingId));
+    scrollStateRefreshTimers.delete(dyingId);
+    hoveredTerminalLinks.delete(dyingId);
 
-  render();
+    state = await window.hangar.killSession(dyingId);
+    if (state.lastWarning) {
+      showError(state.lastWarning);
+    }
+
+    // Closing a session selects nothing. Promoting a neighbour attaches a
+    // terminal the user did not ask for, and on a row they may not even have been
+    // looking at — closing a background session used to yank the view sideways.
+    // Only the session that was on screen loses its selection.
+    if (activeId === dyingId) activeId = null;
+
+    render();
+  } finally {
+    closingSessions.delete(dyingId);
+  }
 }
 
 /** Confirm, then kill. The one path to killing a session from the sidebar. */

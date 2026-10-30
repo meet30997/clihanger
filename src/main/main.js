@@ -528,6 +528,17 @@ function buildMenu() {
       role: 'help',
       submenu: [
         {
+          label: 'CliHanger Help & Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          registerAccelerator: false,
+          click: () => {
+            if (win && !win.isDestroyed()) {
+              win.webContents.executeJavaScript('window.dispatchEvent(new CustomEvent("hangar:help"))').catch(() => {});
+            }
+          },
+        },
+        { type: 'separator' },
+        {
           label: 'Open Config Folder',
           click: () => shell.openPath(path.join(os.homedir(), '.hangar')),
         },
