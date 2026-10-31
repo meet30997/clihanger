@@ -66,9 +66,23 @@ function chatPromptLine(tailLines, agent) {
   try { re = new RegExp(agent.chatPromptPattern, 'u'); } catch { return null; }
   for (let i = tailLines.length - 1; i >= 0; i--) {
     const match = tailLines[i].match(re);
-    if (match) return { text: (match[1] || '').trim() };
+    if (match) return { text: (match[1] || '').trim(), index: i };
   }
   return null;
+}
+
+/**
+ * What the agent has written: the screen above its own input line. The input
+ * line and everything under it (footer, status line, background-task list)
+ * repaint on their own while the agent waits, so they are not output (ADR-088).
+ * A menu drawn with the input marker (`❯ 1. Yes`) is output; the whole screen counts.
+ */
+function outputArea(screen, agent) {
+  const lines = screen.trimEnd().split('\n');
+  const tailStart = Math.max(0, lines.length - 12);
+  const chat = chatPromptLine(lines.slice(tailStart), agent);
+  if (!chat || MENU_ITEM.test(chat.text)) return lines.join('\n');
+  return lines.slice(0, tailStart + chat.index).join('\n').trimEnd();
 }
 
 /**
@@ -117,7 +131,7 @@ async function classify(session) {
     return { status: 'exited', reason: `Foreground process is shell (${pane.command})` };
   }
 
-  const h = hash(screen.trimEnd());
+  const h = hash(outputArea(screen, launcher));
   const prev = memory.get(session.id) || { hash: null, unchanged: 0 };
 
   // Nothing to compare the first screen with, so it is not evidence of work.
@@ -227,8 +241,8 @@ function start(onChange, onGone) {
         waitingSince,
         snoozed,
         promptKind: status === 'needs_input' ? (res.promptKind || null) : null,
-        // Only real agent work makes a seen reply new again.
-        seen: status === 'working' && !res.echo && !res.first ? false : !!entry.seen,
+        // Only your next turn makes an acknowledged reply new again (ADR-090).
+        seen: !!entry.seen,
         // Until the screen is seen changing, leaving the first observation is
         // not a transition worth a notification (ADR-082).
         baseline: !!res.first || (!!entry.baseline && !res.changed),
@@ -284,7 +298,7 @@ function setStatus(sessionId, newStatus, onChange, reason = 'Reported via hook')
     snoozed,
     // A hook does not say whether it is reporting a finished turn or a question.
     promptKind: null,
-    seen: newStatus === 'working' ? false : !!entry.seen,
+    seen: !!entry.seen,
     baseline: false,
     stale: false,
     reason,
@@ -301,14 +315,15 @@ function setStatus(sessionId, newStatus, onChange, reason = 'Reported via hook')
 }
 
 /**
- * Looking at a finished turn acknowledges it. A question the agent is blocked
- * on (`approval`) stays waiting until it is answered.
+ * A finished turn can be acknowledged by looking at it. A question the agent is
+ * blocked on (`approval`) stays waiting until it is answered.
  */
+function isAcknowledgeable(entry) {
+  return entry.status === 'idle' || (entry.status === 'needs_input' && entry.promptKind === 'reply');
+}
+
 function markSeenIfViewed(sessionId, entry) {
-  if (viewer !== sessionId) return;
-  if (entry.status === 'idle' || (entry.status === 'needs_input' && entry.promptKind === 'reply')) {
-    entry.seen = true;
-  }
+  if (viewer === sessionId && isAcknowledgeable(entry)) entry.seen = true;
 }
 
 /**
@@ -316,10 +331,16 @@ function markSeenIfViewed(sessionId, entry) {
  * waiting for you: its empty prompt is not a reply (ADR-082). Questions are.
  */
 function markSeenIfUnused(entry) {
-  if (!entry.fresh) return;
-  if (entry.status === 'idle' || (entry.status === 'needs_input' && entry.promptKind === 'reply')) {
-    entry.seen = true;
-  }
+  if (entry.fresh && isAcknowledgeable(entry)) entry.seen = true;
+}
+
+/**
+ * `seen` sticks from the moment you acknowledge a finished turn until you send
+ * the next one: whatever the agent draws meanwhile (Claude's `※ recap`, tips,
+ * banners) is not a new reply (ADR-090). It never applies to a question.
+ */
+function isSeen(entry) {
+  return !!entry.seen && isAcknowledgeable(entry);
 }
 
 function changePayload(sessionId, entry, prev) {
@@ -330,7 +351,7 @@ function changePayload(sessionId, entry, prev) {
     waitingSince: entry.waitingSince || null,
     snoozed: !!entry.snoozed,
     promptKind: entry.promptKind || null,
-    seen: !!entry.seen,
+    seen: isSeen(entry),
     stale: !!entry.stale,
     baseline: !!entry.baseline,
     reason: entry.reason,
@@ -341,13 +362,23 @@ function changePayload(sessionId, entry, prev) {
 /** Whether a status entry belongs in "Waiting for you". */
 function isWaiting(entry) {
   return !!entry && entry.status === 'needs_input' && !entry.snoozed
-    && !(entry.promptKind === 'reply' && entry.seen);
+    && !(entry.promptKind === 'reply' && isSeen(entry));
 }
 
 /** The next few seconds of screen changes in this session are a repaint for you. */
 function noteUserActivity(sessionId) {
   const entry = memory.get(sessionId);
   if (entry) entry.userActivityAt = Date.now();
+}
+
+/**
+ * You typed without Enter. At a question that can be the answer (Claude's menus
+ * take a bare `1`), so what the agent does next is for you.
+ */
+function noteUserKeys(sessionId) {
+  noteUserActivity(sessionId);
+  const entry = memory.get(sessionId);
+  if (entry?.status === 'needs_input' && entry.promptKind === 'approval') entry.seen = false;
 }
 
 /** The session was started in this run; it stays unused until your first turn. */
@@ -358,7 +389,9 @@ function noteFresh(sessionId) {
 /** You submitted input to the session, so what it does next is for you. */
 function noteUserTurn(sessionId) {
   const entry = memory.get(sessionId);
-  if (entry) entry.fresh = false;
+  if (!entry) return;
+  entry.fresh = false;
+  entry.seen = false;
 }
 
 /** Record which session is on screen (null: none, or the window is not focused). */
@@ -392,7 +425,7 @@ function getDetails(sessionId) {
     waitingSince: entry.waitingSince || null,
     snoozed: !!entry.snoozed,
     promptKind: entry.promptKind || null,
-    seen: !!entry.seen,
+    seen: isSeen(entry),
     stale: !!entry.stale,
     transitionedAt: entry.transitionedAt || null,
     reason: entry.reason || 'No observation recorded yet',
@@ -419,6 +452,7 @@ module.exports = {
   setStatus,
   setViewer,
   noteUserActivity,
+  noteUserKeys,
   noteFresh,
   noteUserTurn,
   isWaiting,
@@ -427,6 +461,7 @@ module.exports = {
   snapshot,
   classify,
   checkPrompt,
+  outputArea,
   memory,
   PROMPT_PATTERNS,
   VALID_STATUSES,

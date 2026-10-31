@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { loadAgents } = require('./agents');
+const { applyLaunchOptions } = require('./agent-options');
 
 const HANGAR_DIR = path.join(os.homedir(), '.hangar');
 const GLOBAL_PRESETS_FILE = path.join(HANGAR_DIR, 'presets.json');
@@ -196,7 +197,7 @@ function validatePreset(projectPath, presetName, rawEntries, agentsMap = null) {
       resolvedPath,
       pathExists,
       pathIsDirectory,
-      command: rawCommand || agent?.command || null,
+      command: rawCommand || (agent ? applyLaunchOptions(agent) : null) || null,
       commandAllowed,
       valid: entryErrors.length === 0,
       errors: entryErrors,

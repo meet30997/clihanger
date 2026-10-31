@@ -21,7 +21,60 @@
     "icon": {
       "file": "agent-icons/provider-1.png",
       "monochrome": true
-    }
+    },
+    "launchOptions": [
+      {
+        "id": "skip-permissions",
+        "label": "Skip permission checks",
+        "args": [
+          "--dangerously-skip-permissions"
+        ],
+        "description": "Bypasses all tool permission checks. Use only in an isolated, trusted environment.",
+        "enabled": false,
+        "group": "permissions",
+        "dangerous": true
+      },
+      {
+        "id": "plan",
+        "label": "Plan mode",
+        "args": [
+          "--permission-mode",
+          "plan"
+        ],
+        "description": "Start in planning mode to review an approach before making changes.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "accept-edits",
+        "label": "Accept file edits",
+        "args": [
+          "--permission-mode",
+          "acceptEdits"
+        ],
+        "description": "Allow file edits without asking for each edit.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "verbose",
+        "label": "Verbose output",
+        "args": [
+          "--verbose"
+        ],
+        "description": "Show additional details in CLI output.",
+        "enabled": false
+      },
+      {
+        "id": "no-chrome",
+        "label": "Disable Chrome integration",
+        "args": [
+          "--no-chrome"
+        ],
+        "description": "Keep browser integration disabled for this session.",
+        "enabled": false
+      }
+    ]
   },
   "codex": {
     "label": "Codex CLI",
@@ -47,7 +100,60 @@
     "icon": {
       "file": "agent-icons/provider-2.png",
       "monochrome": false
-    }
+    },
+    "launchOptions": [
+      {
+        "id": "skip-permissions",
+        "label": "Skip approvals and sandbox",
+        "args": [
+          "--dangerously-bypass-approvals-and-sandbox"
+        ],
+        "description": "Disables approval prompts and sandboxing. Commands run with your user permissions.",
+        "enabled": false,
+        "group": "permissions",
+        "dangerous": true
+      },
+      {
+        "id": "read-only",
+        "label": "Read-only sandbox",
+        "args": [
+          "--sandbox",
+          "read-only"
+        ],
+        "description": "Restrict model-generated shell commands to read-only access.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "workspace-write",
+        "label": "Workspace write sandbox",
+        "args": [
+          "--sandbox",
+          "workspace-write"
+        ],
+        "description": "Allow writes in the workspace within the sandbox.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "search",
+        "label": "Live web search",
+        "args": [
+          "--search"
+        ],
+        "description": "Enable live web search instead of the default cached search.",
+        "enabled": false
+      },
+      {
+        "id": "inline",
+        "label": "Inline terminal display",
+        "args": [
+          "--no-alt-screen"
+        ],
+        "description": "Preserve terminal scrollback by disabling the alternate screen.",
+        "enabled": false
+      }
+    ]
   },
   "agy": {
     "label": "Antigravity",
@@ -72,6 +178,61 @@
     "icon": {
       "file": "agent-icons/provider-3.png",
       "monochrome": false
-    }
+    },
+    "launchOptions": [
+      {
+        "id": "skip-permissions",
+        "label": "Skip permission checks",
+        "args": [
+          "--dangerously-skip-permissions"
+        ],
+        "description": "Auto-approve all tool permission requests. Use only in an isolated, trusted environment.",
+        "enabled": false,
+        "group": "permissions",
+        "dangerous": true
+      },
+      {
+        "id": "plan",
+        "label": "Plan mode",
+        "args": [
+          "--mode",
+          "plan"
+        ],
+        "description": "Start in planning mode.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "accept-edits",
+        "label": "Accept file edits",
+        "args": [
+          "--mode",
+          "accept-edits"
+        ],
+        "description": "Use the CLI’s accept-edits mode.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "sandbox",
+        "label": "Terminal sandbox",
+        "args": [
+          "--sandbox"
+        ],
+        "description": "Enable terminal restrictions.",
+        "enabled": false,
+        "group": "permissions"
+      },
+      {
+        "id": "high-effort",
+        "label": "High reasoning effort",
+        "args": [
+          "--effort",
+          "high"
+        ],
+        "description": "Request high reasoning effort for this session.",
+        "enabled": false
+      }
+    ]
   }
 }

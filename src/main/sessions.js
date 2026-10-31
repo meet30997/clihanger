@@ -7,6 +7,7 @@ const { stripVTControlCharacters } = require('util');
 const t = require('./tmux');
 const store = require('./store');
 const { loadAgents } = require('./agents');
+const { applyLaunchOptions, optionArgs, validateOptionsPlaceholder } = require('./agent-options');
 const presets = require('./presets');
 const status = require('./status');
 
@@ -196,7 +197,7 @@ async function createSession({
     launchPath = customLaunchPath;
   }
 
-  let commandToRun = agent.command;
+  let commandToRun = applyLaunchOptions(agent);
   if (customCommand && typeof customCommand === 'string' && customCommand.trim()) {
     const isShell = agent.kind === 'shell' || !agent.command;
     if (isShell) {
@@ -357,6 +358,8 @@ function buildResumeCommand(agent, conversationId) {
 
   const safeQuotedId = quoteShellArg(trimmedId);
   let cmd = agent.resumeCommand.trim();
+  validateOptionsPlaceholder(cmd);
+  const hasOptions = cmd.includes('{options}');
   if (cmd.includes("`")) throw new Error("Backtick substitutions are not supported in resume templates");
   // Placeholders must be whole, unquoted arguments. Quoting an already-quoted
   // placeholder can re-enable shell expansion inside the identifier.
@@ -381,11 +384,12 @@ function buildResumeCommand(agent, conversationId) {
   if (quote || escaped) throw new Error("Unbalanced quoting in resume template");
   const hasPlaceholder = /\{(?:conversationId|id)\}/.test(cmd);
   // Function replacements preserve literal $&, $', and $` in user values.
-  cmd = cmd.replace(/\{command\}|\{conversationId\}|\{id\}/g, (token) =>
-    token === '{command}' ? (agent.command || '').trim() : safeQuotedId);
+  cmd = cmd.replace(/\{command\}|\{conversationId\}|\{id\}|\{options\}/g, (token) =>
+    token === '{command}' ? (agent.command || '').trim()
+      : token === '{options}' ? optionArgs(agent, 'resume') : safeQuotedId);
   if (!hasPlaceholder) cmd = `${cmd} ${safeQuotedId}`;
 
-  return cmd.trim();
+  return hasOptions ? cmd.trim() : applyLaunchOptions(agent, cmd.trim(), 'resume');
 }
 
 /**
@@ -400,18 +404,21 @@ function buildResumePickerCommand(agent) {
   }
 
   let cmd = agent.resumePickerCommand.trim();
+  validateOptionsPlaceholder(cmd);
+  const hasOptions = cmd.includes('{options}');
   if (cmd.includes('`')) {
     throw new Error('Backtick substitutions are not supported in resume picker templates');
   }
 
   const placeholders = cmd.match(/\{[^{}]+\}/g) || [];
-  if (placeholders.some((token) => token !== '{command}')) {
+  if (placeholders.some((token) => !['{command}', '{options}'].includes(token))) {
     throw new Error('Resume picker template contains an unsupported placeholder');
   }
 
-  cmd = cmd.replace(/\{command\}/g, () => (agent.command || '').trim());
+  cmd = cmd.replace(/\{command\}|\{options\}/g, (token) =>
+    token === '{command}' ? (agent.command || '').trim() : optionArgs(agent, 'resume'));
   if (!cmd) throw new Error('Resume picker command is empty');
-  return cmd;
+  return hasOptions ? cmd.trim() : applyLaunchOptions(agent, cmd, 'resume');
 }
 
 function buildResumeFailurePattern(agent) {
@@ -610,7 +617,7 @@ async function startParkedSession(sessionId, options = {}) {
     throw new Error(`Folder is gone: ${session.launchPath ?? 'unknown'}`);
   }
 
-  let commandToRun = agent.command;
+  let commandToRun = applyLaunchOptions(agent);
   let resumeFailurePattern = null;
   let capturePath = null;
   if (options && options.resume) {

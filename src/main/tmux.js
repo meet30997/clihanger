@@ -137,51 +137,25 @@ bind -T root M-Left  if-shell -F "#{alternate_on}" { send-keys M-Left } { send-k
 bind -T root M-Right if-shell -F "#{alternate_on}" { send-keys M-Right } { send-keys -H 1b 66 }
 `;
 
-// Every default copy binding ends in `copy-pipe-and-cancel`, and leaving copy
-// mode is what returns a pane to the live bottom. So the copy itself is fine but
-// the cancel throws the view away: scroll up, select a line, and the pane snaps
-// to the end. A mouse-aware CLI never showed it because its drags never reach
-// copy mode at all.
-//
-// `scroll_position` is 0 exactly when the pane is already at the bottom, which is
-// where cancelling moves nothing — keep the default there. Anywhere else use
-// `copy-pipe`, which copies and clears the selection but stays put. Copy mode is
-// entered with `-e` (below, and in the WheelUpPane binding), so scrolling back
-// down still leaves it.
-const COPY_KEEPS_SCROLL = `# Copy without losing the scroll position.
+// Finish a selection without copying, clearing it or moving the viewport.
+// Mouse-aware CLIs still receive ordinary drags; Option-drag stays in xterm.
+const SELECTION_BINDINGS = `# Select terminal text without copying it.
 bind -T root MouseDrag1Pane \\
   if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" \\
     { send-keys -M } \\
     { copy-mode -eM }
 
-bind -T copy-mode MouseDragEnd1Pane \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
-bind -T copy-mode-vi MouseDragEnd1Pane \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
+bind -T copy-mode MouseDragEnd1Pane send-keys -X stop-selection
+bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X stop-selection
 
-# Double- and triple-click land in the copy-mode tables only when the pane is
-# already in copy mode — i.e. exactly the scrolled-up case.
-bind -T copy-mode DoubleClick1Pane select-pane \\; send-keys -X select-word \\; run-shell -d 0.3 \\; \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
-bind -T copy-mode TripleClick1Pane select-pane \\; send-keys -X select-line \\; run-shell -d 0.3 \\; \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
-bind -T copy-mode-vi DoubleClick1Pane select-pane \\; send-keys -X select-word \\; run-shell -d 0.3 \\; \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
-bind -T copy-mode-vi TripleClick1Pane select-pane \\; send-keys -X select-line \\; run-shell -d 0.3 \\; \\
-  if-shell -F "#{==:#{scroll_position},0}" \\
-    { send-keys -X copy-pipe-and-cancel } \\
-    { send-keys -X copy-pipe }
-`;
+# Override tmux's delayed auto-copy while preserving CLI mouse handling.
+${[['DoubleClick1Pane', 'select-word'], ['TripleClick1Pane', 'select-line']].map(([key, command]) => `
+bind -T root ${key} \\
+  if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" \\
+    { send-keys -M } \\
+    { copy-mode -e ; send-keys -X ${command} }
+${['copy-mode', 'copy-mode-vi'].map(table => `bind -T ${table} ${key} select-pane \\; send-keys -X ${command}`).join('\n')}
+`).join('')}`;
 
 // macOS paints text selection with live system colours. Main supplies those
 // values at boot and when appearance preferences change; these
@@ -218,8 +192,7 @@ setw -g  aggressive-resize on
 # never auto-kill a session just because nobody is watching
 set  -g  destroy-unattached off
 
-# A completed mouse/keyboard selection is copied to the macOS pasteboard.
-# tmux's default copy-mode bindings already call copy-pipe-and-cancel.
+# Explicit Copy sends the selected text to the macOS pasteboard.
 set  -s  copy-command '/usr/bin/pbcopy'
 
 # Smooth single-line trackpad/wheel scrolling instead of default 5-line jumps
@@ -240,7 +213,7 @@ bind -T root WheelDownPane \\
     { if-shell -F "#{alternate_on}" { send-keys -N 1 Down } { send-keys -M } }
 
 ${selectionStyle()}
-${COPY_KEEPS_SCROLL}
+${SELECTION_BINDINGS}
 ${MOUSE_MENU_BINDINGS}
 ${PASSTHROUGH_SETTINGS}`;
 }
@@ -250,15 +223,25 @@ function ensureTmuxConf() {
     fs.mkdirSync(HANGAR_DIR, { recursive: true });
     let keys = null;
     try { keys = fs.readFileSync(KEYS_CONF, 'utf8'); } catch {}
-    if (keys !== KEY_ROUTING) fs.writeFileSync(KEYS_CONF, KEY_ROUTING, 'utf8');
+    const keyConfig = KEY_ROUTING + '\n' + SELECTION_BINDINGS;
+    if (keys !== keyConfig) fs.writeFileSync(KEYS_CONF, keyConfig, 'utf8');
     if (!fs.existsSync(CONF)) {
       fs.writeFileSync(CONF, tmuxConfTemplate(), 'utf8');
       return;
     }
     let current = fs.readFileSync(CONF, 'utf8');
+    const migrated = current.replace(
+      /^# Copy without losing the scroll position\.\n[\s\S]*?(?=\n# Replace tmux's right-click pane menu)/m,
+      SELECTION_BINDINGS,
+    ).replace('# A completed mouse/keyboard selection is copied to the macOS pasteboard.\n# tmux\'s default copy-mode bindings already call copy-pipe-and-cancel.',
+      '# Explicit Copy sends the selected text to the macOS pasteboard.');
+    if (migrated !== current) {
+      fs.writeFileSync(CONF, migrated, 'utf8');
+      current = migrated;
+    }
     if (!current.includes('copy-command')) {
       fs.appendFileSync(CONF, `
-# Copy completed tmux selections to the macOS pasteboard
+# Explicit Copy sends selected text to the macOS pasteboard
 set  -s  copy-command '/usr/bin/pbcopy'
 `, 'utf8');
     }
@@ -300,8 +283,8 @@ bind -T root WheelDownPane \\
         current = updated;
       }
     }
-    if (!current.includes('MouseDragEnd1Pane')) {
-      fs.appendFileSync(CONF, `\n${COPY_KEEPS_SCROLL}`, 'utf8');
+    if (!current.includes('# Select terminal text without copying it.')) {
+      fs.appendFileSync(CONF, `\n${SELECTION_BINDINGS}`, 'utf8');
     }
     if (!current.includes('extended-keys-format csi-u')) {
       fs.appendFileSync(CONF, `
@@ -575,6 +558,18 @@ async function clearPane(name) {
   await tmux(['clear-history', '-t', target]);
 }
 
+/** Ask tmux rather than guessing a selection from mouse gestures/clipboard. */
+async function hasPaneSelection(name) {
+  return (await tmux(['display-message', '-p', '-t', `=${name}:`, '#{selection_present}'])).trim() === '1';
+}
+
+async function copyPaneSelection(name) {
+  if (!await hasPaneSelection(name)) return { copied: false };
+  // Keep the highlight and viewport intact. The pipe runs only for explicit Copy.
+  await tmux(['send-keys', '-X', '-t', `=${name}:`, 'copy-pipe-no-clear', '/usr/bin/pbcopy']);
+  return { copied: true };
+}
+
 /** Authoritative copy-mode state for the terminal scroll indicator. */
 async function paneScrollState(name) {
   const out = await tmux([
@@ -703,7 +698,7 @@ async function sendKeys(name, text, enter = true) {
 /** Arguments for spawning an attached client. Used by node-pty in Phase 3. */
 function attachArgs(name) {
   // Existing servers have already read tmux.conf. Apply the key transport
-  // settings and editing chords before attaching too, without restarting any
+  // settings, editing chords and selection bindings before attaching, without restarting
   // running sessions.
   return [
     '-L', SOCKET, '-f', CONF,
@@ -719,6 +714,6 @@ module.exports = {
   tmux, tmuxBin, tmuxEnv, slugify, createSession, listSessions, listPanes,
   hasSession, killSession, killServer, capturePane, captureFullScrollback, sendKeys, attachArgs,
   stopPaneCapture, paneCurrentCommand, captureChatOutput,
-  clearPane, paneScrollState, scrollPaneToBottom, searchPane, moveCursorInLine, logicalLineSpan,
+  hasPaneSelection, copyPaneSelection, clearPane, paneScrollState, scrollPaneToBottom, searchPane, moveCursorInLine, logicalLineSpan,
   ensureTmuxConf, configureSelectionStyle, applySelectionStyle,
 };

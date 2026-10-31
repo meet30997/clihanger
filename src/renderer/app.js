@@ -246,6 +246,8 @@ const ICONS = {
   check:        '<path d="M3.5 8.5l3 3 6-6"/>',
   stop:         '<rect x="4.25" y="4.25" width="7.5" height="7.5" rx="1.5"/>',
   help:         '<circle cx="8" cy="8" r="6"/><path d="M6.25 6a1.75 1.75 0 1 1 2.7 1.45C8.2 7.9 8 8.2 8 9"/><path d="M8 11h.01"/>',
+  settings:     '<path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="5.5" cy="4" r="1.5"/><circle cx="10.5" cy="8" r="1.5"/><circle cx="6.5" cy="12" r="1.5"/>',
+  more:         '<circle cx="3" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="8" r="1"/>',
 };
 
 function iconSvg(name, extraClass = '') {
@@ -258,7 +260,9 @@ function mountStaticIcons() {
   const slots = [
     ['#add-project', 'folderPlus'],
     ['#sidebar-search .icon-slot', 'search'],
+    ['#sidebar-more .icon-slot', 'more'],
     ['#sidebar-help .icon-slot', 'help'],
+    ['#sidebar-settings .icon-slot', 'settings'],
     ['#help-close .icon-slot', 'close'],
     ['#sidebar-collapse', 'sidebar'],
     ['#sidebar-expand .icon-slot', 'sidebar'],
@@ -462,6 +466,65 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+/* ---------- Sidebar menu ---------- */
+
+const moreButton = $('#sidebar-more');
+const moreMenu = $('#sidebar-menu');
+const moreItems = [...moreMenu.querySelectorAll('[role="menuitem"]')];
+
+function closeMoreMenu() {
+  if (!moreMenu.matches(':popover-open')) return;
+  const restore = moreMenu.contains(document.activeElement);
+  moreMenu.hidePopover();
+  moreButton.setAttribute('aria-expanded', 'false');
+  if (restore) moreButton.focus();
+}
+
+function openMoreMenu(last = false) {
+  closeLauncher();
+  moreMenu.showPopover();
+  const rect = moreButton.getBoundingClientRect();
+  moreMenu.style.left = `${Math.max(8, Math.min(rect.right - moreMenu.offsetWidth, innerWidth - moreMenu.offsetWidth - 8))}px`;
+  moreMenu.style.top = `${Math.max(8, rect.top - moreMenu.offsetHeight - 6)}px`;
+  moreButton.setAttribute('aria-expanded', 'true');
+  moreItems[last ? moreItems.length - 1 : 0].focus();
+}
+
+moreButton.addEventListener('click', (event) => {
+  event.preventDefault();
+  if (moreMenu.matches(':popover-open')) closeMoreMenu();
+  else openMoreMenu();
+});
+moreButton.addEventListener('keydown', (event) => {
+  if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openMoreMenu(event.key === 'ArrowUp');
+});
+moreMenu.addEventListener('toggle', () => {
+  moreButton.setAttribute('aria-expanded', String(moreMenu.matches(':popover-open')));
+});
+// Restore the visible trigger before a menu item opens its modal dialog.
+moreMenu.addEventListener('click', (event) => {
+  if (event.target.closest('[role="menuitem"]')) closeMoreMenu();
+}, true);
+moreMenu.addEventListener('keydown', (event) => {
+  event.stopPropagation();
+  if (event.key === 'Tab') { closeMoreMenu(); return; }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeMoreMenu();
+    return;
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const index = moreItems.indexOf(document.activeElement);
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? moreItems.length - 1
+    : (index + (event.key === 'ArrowDown' ? 1 : -1) + moreItems.length) % moreItems.length;
+  moreItems[next].focus();
+});
+window.addEventListener('resize', closeMoreMenu);
+
 /* ---------- Help ---------- */
 
 const helpDialog = $('#help-dialog');
@@ -479,10 +542,11 @@ function selectHelpTab(tab) {
 }
 
 function openHelp() {
-  if (helpDialog.open) return;
+  if (helpDialog.open || $('#settings-dialog').open) return;
   // Keep existing dialogs intact; Help must not cover a pending decision.
   if (modalResolve || !$('#preset-modal').hidden || !$('#handoff-modal').hidden
     || !$('#breadcrumb-editor').classList.contains('hidden')) return;
+  closeMoreMenu();
   helpOpener = document.activeElement;
   selectHelpTab(helpTabs[0]);
   helpDialog.showModal();
@@ -518,6 +582,7 @@ helpDialog.querySelector('[role="tablist"]').addEventListener('keydown', (event)
 // Capture before application shortcuts and Escape handlers. Native <dialog>
 // makes the workspace inert; the close handler restores the opener's focus.
 window.addEventListener('keydown', (event) => {
+  if ($('#settings-dialog').open) return;
   const helpShortcut = event.metaKey && !event.ctrlKey && !event.altKey
     && !event.shiftKey && event.key === '/';
   if (!helpDialog.open) {
@@ -820,6 +885,7 @@ window.addEventListener('click', (event) => {
 
 // Escape unwinds one layer at a time; the modal owns it while it is up.
 window.addEventListener('keydown', (event) => {
+  if ($('#settings-dialog').open) return;
   if (event.key !== 'Escape' || modalResolve) return;
   if (!$('#switcher').hidden) {
     event.preventDefault();
@@ -1187,54 +1253,37 @@ $('#tree')?.addEventListener('keydown', (e) => {
 
 /* ---------- Terminals & WebLinks ---------- */
 
-// Normal drags are tmux copy-mode selections, so xterm emits no selection
-// event. Observe the gesture without consuming it and acknowledge on release;
-// tmux's MouseDragEnd binding copies through /usr/bin/pbcopy at the same point.
-let terminalCopyGesture = null;
-const terminalSelections = new Map(); // sessionId → most recent selected text, or null while pbcopy settles
-document.addEventListener('mousedown', (event) => {
-  const target = event.target instanceof Element ? event.target : null;
-  const terminal = target?.closest('.term-wrap.active');
-  if (event.button !== 0 || !terminal) {
-    terminalCopyGesture = null;
-    return;
+// xterm owns local (Option-drag) selections; tmux owns ordinary selections.
+// Neither writes to the pasteboard until the user explicitly chooses Copy.
+async function copyTerminalSelection(sessionId) {
+  const entry = terms.get(sessionId);
+  if (!entry) return;
+  try {
+    const text = entry.term.getSelection();
+    if (text) {
+      window.hangar.copyText(text);
+      showCopiedIndicator();
+    } else if ((await window.hangar.copyTerminalSelection(sessionId)).copied) {
+      showCopiedIndicator();
+    }
+  } catch (err) {
+    showError(`Could not copy terminal selection: ${err.message}`);
   }
-  terminalCopyGesture = {
-    sessionId: activeId,
-    x: event.clientX,
-    y: event.clientY,
-    moved: false,
-    multiClick: event.detail >= 2,
-  };
-}, true);
+}
 
-document.addEventListener('mousemove', (event) => {
-  if (!terminalCopyGesture) return;
-  const dx = event.clientX - terminalCopyGesture.x;
-  const dy = event.clientY - terminalCopyGesture.y;
-  if (dx * dx + dy * dy >= 16) terminalCopyGesture.moved = true;
-}, true);
+window.addEventListener('hangar:copy', (event) => {
+  if (!activeId || !terms.get(activeId)?.el.contains(document.activeElement)) return;
+  event.preventDefault();
+  copyTerminalSelection(activeId);
+});
 
-document.addEventListener('mouseup', (event) => {
-  const gesture = terminalCopyGesture;
-  terminalCopyGesture = null;
-  if (!gesture || event.button !== 0 || !gesture.sessionId) return;
-  if (!gesture.moved && !gesture.multiClick) {
-    terminalSelections.delete(gesture.sessionId);
-    return;
-  }
-
-  // tmux owns ordinary mouse selection and writes it through pbcopy, so xterm's
-  // getSelection() is empty. Remember that a real selection completed now and
-  // read back the exact copied text after tmux's binding has settled. Marking
-  // the entry immediately keeps Copy enabled even for a very fast right-click.
-  terminalSelections.set(gesture.sessionId, null);
-  setTimeout(() => {
-    const text = window.hangar.readClipboardText();
-    if (text) terminalSelections.set(gesture.sessionId, text);
-    else terminalSelections.delete(gesture.sessionId);
-    showCopiedIndicator();
-  }, gesture.multiClick ? 375 : 75);
+// Catch browser Copy before xterm's textarea handler as well. Inputs elsewhere
+// in the app retain the browser's normal copy behavior.
+document.addEventListener('copy', (event) => {
+  if (!activeId || !terms.get(activeId)?.el.contains(document.activeElement)) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  copyTerminalSelection(activeId);
 }, true);
 
 const terms = new Map();   // sessionId → { term, fit, el }
@@ -1478,26 +1527,27 @@ function getTerm(sessionId) {
     event.preventDefault();
     return false;
   });
+  // A selection made at the live bottom holds the pane in copy mode only to
+  // keep its highlight. Typing dismisses it first, as in any terminal; copy
+  // mode would otherwise swallow the keys, and its Enter would copy-pipe.
+  let inputGate = null;
   term.onData((data) => {
+    const chatTitle = submittedChatTitle(sessionId, term, data);
+    const scroll = terminalScrollStates.get(sessionId);
     const isMouseReport = data.startsWith('\x1b[<') || data.startsWith('\x1b[M');
-    if (!isMouseReport) terminalSelections.delete(sessionId);
-    if (terminalScrollStates.get(sessionId)?.inCopyMode) scheduleTerminalScrollStateRefresh(sessionId);
-    window.hangar.termInput(sessionId, data, submittedChatTitle(sessionId, term, data));
-  });
-  let selectionCopyTimer = null;
-  term.onSelectionChange(() => {
-    const selection = term.getSelection();
-    if (selection) {
-      terminalSelections.set(sessionId, selection);
-      // tmux's MouseDragEnd binding may run pbcopy after xterm reports its
-      // selection. Let that event settle, then make the renderer the final
-      // clipboard writer so an empty tmux copy cannot erase the selected text.
-      clearTimeout(selectionCopyTimer);
-      selectionCopyTimer = setTimeout(() => {
-        window.hangar.copyText(selection);
-        showCopiedIndicator();
-      }, 75);
+    if (scroll?.inCopyMode && scroll.scrollPosition === 0 && !isMouseReport) {
+      updateCopyModeBadge(sessionId, { inCopyMode: false, scrollPosition: 0 });
+      const gate = window.hangar.scrollTerminalToBottom(sessionId)
+        .then((next) => updateCopyModeBadge(sessionId, next))
+        .catch(() => {});
+      inputGate = gate;
+      gate.then(() => { if (inputGate === gate) inputGate = null; });
+    } else if (scroll?.inCopyMode) {
+      scheduleTerminalScrollStateRefresh(sessionId);
     }
+    const send = () => window.hangar.termInput(sessionId, data, chatTitle);
+    if (inputGate) inputGate.then(send);
+    else send();
   });
   // Dropping files types their shell-escaped paths, as Terminal.app does: one
   // paste, a trailing space, no Return. A paste rather than keystrokes keeps
@@ -1525,8 +1575,18 @@ function getTerm(sessionId) {
     term.paste(text);
     term.focus();
   });
-  // An Option-click (no drag, no selection) positions the cursor; an Option-drag
-  // still selects, as macOptionClickForcesSelection makes it.
+  // The contextmenu event is too late: xterm has already forwarded the press
+  // to tmux/the CLI and may have changed the selection. Keep the entire native
+  // menu gesture out of their mouse handlers, including macOS Control-click.
+  const isContextClick = (event) => event.button === 2 || (event.button === 0 && event.ctrlKey);
+  for (const type of ['mousedown', 'mouseup', 'auxclick']) {
+    el.addEventListener(type, (event) => {
+      if (!isContextClick(event)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
+  }
+  // An Option-click positions the cursor; an Option-drag still selects.
   let optionPress = null;
   el.addEventListener('mousedown', (event) => {
     optionPress = event.button === 0 && event.altKey && !event.metaKey && !event.ctrlKey
@@ -1539,12 +1599,17 @@ function getTerm(sessionId) {
     if (terminalScrollStates.get(sessionId)?.inCopyMode) return;
     optionClickMove(sessionId, term, event);
   }, true);
+  // Drags and double/triple-clicks can enter copy mode without scrolling.
+  // Refresh the badge so Escape and typing know the pane is holding a selection.
+  el.addEventListener('mouseup', (event) => {
+    if (event.button === 0) scheduleTerminalScrollStateRefresh(sessionId);
+  }, true);
   el.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     hideContextMenu();
     const linkUrl = hoveredTerminalLinks.get(sessionId) || null;
-    const hasSelection = Boolean(term.getSelection()) || terminalSelections.has(sessionId);
+    const hasSelection = term.hasSelection();
     window.hangar.showTerminalContextMenu(sessionId, hasSelection, linkUrl)
       .catch((err) => showError(`Could not open terminal menu: ${err.message}`));
   }, { capture: true });
@@ -1684,13 +1749,7 @@ window.hangar.onTermContextAction(({ sessionId, action, linkUrl }) => {
   if (!entry) return;
 
   if (action === 'copy') {
-    const selection = entry.term.getSelection()
-      || terminalSelections.get(sessionId)
-      || (terminalSelections.has(sessionId) ? window.hangar.readClipboardText() : '');
-    if (selection) {
-      window.hangar.copyText(selection);
-      showCopiedIndicator();
-    }
+    copyTerminalSelection(sessionId);
   } else if (action === 'paste') {
     const text = window.hangar.readClipboardText();
     if (text) entry.term.paste(text);
@@ -2937,7 +2996,6 @@ async function terminateSession(dyingId) {
     terms.delete(dyingId);
     wheelRemainders.delete(dyingId);
     terminalScrollStates.delete(dyingId);
-    terminalSelections.delete(dyingId);
     pendingScrollStateChecks.delete(dyingId);
     clearTimeout(scrollStateRefreshTimers.get(dyingId));
     scrollStateRefreshTimers.delete(dyingId);
@@ -2999,7 +3057,7 @@ function orderedSessions() {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (modalResolve || !$('#breadcrumb-editor').classList.contains('hidden')) return;
+  if ($('#settings-dialog').open || modalResolve || !$('#breadcrumb-editor').classList.contains('hidden')) return;
 
   // ⌘1..9 — jump to Nth session
   if (e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {

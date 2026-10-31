@@ -33,7 +33,11 @@
         <button id="add-project" class="icon-button" title="Add project (⌘O)" aria-label="Add project"></button>
         <button id="sidebar-search" class="icon-button" title="Find a session (⌘P)" aria-label="Find a session (⌘P)"><span class="icon-slot" aria-hidden="true"></span></button>
         <span id="running-count">0 running</span>
-        <button id="sidebar-help" class="help-button" title="Help & Shortcuts (⌘/)" aria-haspopup="dialog"><span class="icon-slot" aria-hidden="true"></span>Help</button>
+        <button id="sidebar-more" class="icon-button" title="More" aria-label="More" popovertarget="sidebar-menu" aria-haspopup="menu" aria-controls="sidebar-menu" aria-expanded="false"><span class="icon-slot" aria-hidden="true"></span></button>
+        <div id="sidebar-menu" popover="auto" role="menu" aria-label="More">
+          <button id="sidebar-settings" role="menuitem" tabindex="-1"><span class="icon-slot" aria-hidden="true"></span><span>Settings…</span><kbd>⌘,</kbd></button>
+          <button id="sidebar-help" role="menuitem" tabindex="-1"><span class="icon-slot" aria-hidden="true"></span><span>Help & Shortcuts</span><kbd>⌘/</kbd></button>
+        </div>
       </footer>
     </aside>
     <div id="sidebar-resizer" role="separator" tabindex="0" aria-label="Sidebar width"
@@ -94,7 +98,7 @@
             <div id="ready-agents" class="ready-card"></div>
             <div class="ready-card"><div class="ready-row"><span class="icon-slot" data-icon="terminal"></span><span>tmux<small>Runs your sessions in the background</small></span><span id="ready-tmux"></span></div></div>
             <p class="ready-hint">Configured agents may still need installation or sign-in.</p>
-            <p class="ready-footnote">Using another agent CLI? Add it in <code>~/.hangar/agents.json</code> and it shows up here.</p>
+            <p class="ready-footnote">Using another agent CLI? Add it in <button id="ready-settings" class="text-button" aria-haspopup="dialog">Settings → Agents</button>.</p>
           </aside>
           </div>
         </div>
@@ -167,6 +171,55 @@
     </main>
   </div>
 
+  <dialog id="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
+    <header class="help-header">
+      <div><h1 id="settings-title">Settings</h1><p id="settings-description">Agents · Launch options and JSON configuration</p></div>
+      <button id="settings-close" class="icon-button" aria-label="Close settings" autofocus><span data-icon="close"></span></button>
+    </header>
+    <div class="help-tabs" role="tablist" aria-label="Agent settings">
+      <button id="settings-options-tab" role="tab" aria-selected="true" aria-controls="settings-options-panel">Launch options</button>
+      <button id="settings-json-tab" role="tab" aria-selected="false" aria-controls="settings-json-panel" tabindex="-1">JSON file</button>
+    </div>
+    <div id="settings-content">
+      <section id="settings-options-panel" role="tabpanel" aria-labelledby="settings-options-tab">
+        <nav id="settings-agent-list" aria-label="Configured agents"></nav>
+        <div id="settings-agent-detail">
+          <h2 id="settings-agent-name">Loading agents…</h2>
+          <p id="settings-agent-command" class="settings-code"></p>
+          <p class="settings-hint">Choose up to five options defined for this agent. Save to use them on the next start or resume.</p>
+          <div id="settings-options"></div>
+          <section id="settings-command-preview" aria-label="Command preview">
+            <h3>Command preview</h3>
+            <dl id="settings-previews"></dl>
+          </section>
+        </div>
+      </section>
+      <section id="settings-json-panel" role="tabpanel" aria-labelledby="settings-json-tab" hidden>
+        <div class="settings-json-toolbar"><code>~/.hangar/agents.json</code><div>
+          <button id="settings-copy" class="btn-sm">Copy JSON</button>
+          <button id="settings-format" class="btn-sm" disabled>Format</button>
+          <button id="settings-edit" class="btn-sm">Edit JSON</button>
+        </div></div>
+        <label class="settings-hint" for="settings-json">Agent definitions and up to five launchOptions per agent. Editing commands changes what runs on your Mac.</label>
+        <textarea id="settings-json" readonly spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="settings-json-help settings-error"></textarea>
+        <p id="settings-json-help" class="settings-hint">Each option has an id, label, args array and enabled boolean. Optional: description, dangerous, group (mutually exclusive), appliesTo (fresh/resume). Add an empty launchOptions array to hide bundled options.</p>
+      </section>
+    </div>
+    <p id="settings-error" role="alert" hidden></p>
+    <div id="settings-discard" hidden>
+      <span>Discard unsaved changes?</span>
+      <button id="settings-keep" class="btn-sm">Keep editing</button>
+      <button id="settings-confirm-discard" class="btn-sm btn-danger">Discard changes</button>
+    </div>
+    <footer class="help-footer">
+      <span id="settings-status" role="status">Loading…</span>
+      <div class="settings-actions">
+        <button id="settings-reload" class="btn-sm">Reload file</button>
+        <button id="settings-save" class="btn-sm btn-primary" disabled>Save changes</button>
+      </div>
+    </footer>
+  </dialog>
+
   <dialog id="help-dialog" aria-labelledby="help-title" aria-describedby="help-description">
     <header class="help-header">
       <div><h1 id="help-title">Help & Shortcuts</h1><p id="help-description">Your projects, terminals, and coding agents in one place.</p></div>
@@ -188,7 +241,7 @@
           <section><h3>Waiting for you</h3><p>Find unread replies and prompts that need your input here. Use <kbd>⇧⌘J</kbd> to jump to the next waiting session. Select a status dot for the observation behind it; detection can be imperfect.</p></section>
           <section><h3>Listening Ports</h3><p>See local servers and the sessions they belong to. <strong>Unknown ownership</strong> means a process could not be linked to a session. <strong>Stop</strong> ends the whole process, including every port it serves.</p></section>
           <section><h3>Keep your place</h3><p>Rename a session or add a task note from the inspector. Right-click a session for more actions, including snoozing attention and copying a handoff.</p></section>
-          <section><h3>Configure your agents</h3><p>Choose <strong>Help → Open Config Folder</strong> in the macOS menu bar, then edit <code>agents.json</code> to add or customize agent commands.</p></section>
+          <section><h3>Configure your agents</h3><p>Open <strong>Settings → Agents</strong> (⌘,) to view or edit <code>agents.json</code> and choose launch options. Saved options apply when you next start or resume a session.</p></section>
         </div>
         <aside class="help-callout"><h3>When you quit</h3><p>Quitting CliHanger or closing its last window stops all managed sessions and their processes. Saved sessions remain in the sidebar for reopening; conversation resume depends on the agent.</p></aside>
       </section>
@@ -202,6 +255,8 @@
             <div><dt>Jump to session in sidebar order</dt><dd><kbd>⌘1–9</kbd></dd></div>
             <div><dt>Next waiting session</dt><dd><kbd>⇧⌘J</kbd></dd></div>
             <div><dt>Show or hide sidebar</dt><dd><kbd>⌘B</kbd></dd></div>
+            <div><dt>Open agent settings</dt><dd><kbd>⌘,</kbd></dd></div>
+            <div><dt>Save changes in Settings</dt><dd><kbd>⌘S</kbd></dd></div>
             <div><dt>Open help</dt><dd><kbd>⌘/</kbd></dd></div>
           </dl></section>
           <section><h2>Terminal</h2><dl class="help-shortcuts">
@@ -219,7 +274,7 @@
             <div><dt>Close a dialog or search</dt><dd><kbd>esc</kbd></dd></div>
           </dl></section>
         </div>
-        <p class="help-key-note">Selecting terminal text copies it automatically. Option-drag selects text locally when a CLI handles mouse input. With no active terminal, <kbd>⌘K</kbd> opens the session switcher.</p>
+        <p class="help-key-note">Copy selected terminal text with <kbd>⌘C</kbd> or right-click → Copy. Option-drag selects text locally when a CLI handles mouse input. With no active terminal, <kbd>⌘K</kbd> opens the session switcher.</p>
       </section>
     </div>
     <footer class="help-footer"><span>⌘ Command <span aria-hidden="true">·</span> ⌥ Option <span aria-hidden="true">·</span> ⇧ Shift <span aria-hidden="true">·</span> ⌃ Control</span><button id="help-done" class="btn-secondary">Done</button></footer>
@@ -351,5 +406,6 @@
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
   <script src="../../node_modules/@xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.js"></script>
   <script src="app.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

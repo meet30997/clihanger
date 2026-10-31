@@ -13,6 +13,7 @@ const store = require('./store');
 const ports = require('./ports');
 const status = require('./status');
 const agents = require('./agents');
+const { applyLaunchOptions } = require('./agent-options');
 const tmux = require('./tmux');
 const presets = require('./presets');
 const chatTitles = require('./chat-titles');
@@ -272,6 +273,20 @@ function createWindow() {
     app.quit();
   });
   win.webContents.on('did-finish-load', syncOptionMetaMenu);
+  // Never open web content in an Electron window: send http(s) links to the
+  // default browser and block in-app navigation away from the renderer.
+  const openInBrowser = (url) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+  };
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    openInBrowser(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url === win.webContents.getURL()) return;
+    event.preventDefault();
+    openInBrowser(url);
+  });
   win.on('focus', syncViewer);
   win.on('blur', syncViewer);
   win.on('hide', syncViewer);
@@ -358,6 +373,17 @@ function buildMenu() {
       submenu: [
         { role: 'about' },
         { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => {
+            if (!win || win.isDestroyed()) createWindow();
+            win.show();
+            win.focus();
+            win.webContents.executeJavaScript('window.dispatchEvent(new CustomEvent("hangar:settings"))').catch(() => {});
+          },
+        },
+        { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
         { role: 'hide' },
@@ -405,7 +431,18 @@ function buildMenu() {
         { role: 'redo' },
         { type: 'separator' },
         { role: 'cut' },
-        { role: 'copy' },
+        {
+          label: 'Copy', accelerator: 'CmdOrCtrl+C',
+          click: () => {
+            if (!win || win.isDestroyed()) return;
+            const contents = win.webContents;
+            // Native Copy does not fire a DOM copy event for tmux's selection,
+            // which has no browser range. Offer it to the terminal first.
+            contents.executeJavaScript('window.dispatchEvent(new CustomEvent("hangar:copy", { cancelable: true }))')
+              .then((unhandled) => { if (unhandled && !contents.isDestroyed()) contents.copy(); })
+              .catch((err) => console.error('Failed to route Copy:', err.message));
+          },
+        },
         { role: 'paste' },
         { role: 'selectAll' },
       ],
@@ -656,6 +693,31 @@ app.on('before-quit', (event) => {
 
 /* ---------------- IPC ---------------- */
 
+function previewAgentConfiguration(json) {
+  const configured = agents.mergeDefaults(agents.parseConfiguration(json));
+  const previews = Object.fromEntries(Object.entries(configured).map(([id, agent]) => [id, {
+    fresh: applyLaunchOptions(agent),
+    resume: agent.resumeCommand ? sessions.buildResumeCommand(agent, 'CONVERSATION_ID') : null,
+    picker: agent.resumePickerCommand ? sessions.buildResumePickerCommand(agent) : null,
+  }]));
+  return { valid: true, agents: configured, previews };
+}
+
+handleChecked('agents:get', () => agents.getConfiguration());
+handleChecked('agents:preview', (_e, { json }) => {
+  try { return previewAgentConfiguration(json); }
+  catch (err) { return { valid: false, agents: {}, previews: {}, error: err.message }; }
+});
+handleChecked('agents:save', (_e, { json, revision }) => {
+  try {
+    previewAgentConfiguration(json);
+    const configuration = agents.saveConfiguration(json, revision);
+    broadcast('state:changed', getStateWithTmux());
+    updateTray();
+    return { ok: true, configuration };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 handleChecked('state:get', async () => {
   try {
     await sessions.reconcile();
@@ -836,7 +898,7 @@ handleChecked('session:viewing', (_e, { sessionId }) => {
 
 handleChecked('term:input', (_e, { sessionId, data, chatTitle }) => {
   // Typing repaints the input line; Enter starts a turn, which is real work.
-  if (!/[\r\n]/.test(data)) status.noteUserActivity(sessionId);
+  if (!/[\r\n]/.test(data)) status.noteUserKeys(sessionId);
   else {
     status.noteUserTurn(sessionId);
     acknowledgeNotification(sessionId);
@@ -891,15 +953,21 @@ handleChecked('term:scroll-bottom', async (_e, { sessionId }) => {
   return tmux.scrollPaneToBottom(session.tmuxName);
 });
 
-handleChecked('term:context-menu', (_e, { sessionId, hasSelection, linkUrl }) => {
-  runningTerminalSession(sessionId);
+handleChecked('term:copy-selection', async (_e, { sessionId }) => {
+  const session = runningTerminalSession(sessionId);
+  return tmux.copyPaneSelection(session.tmuxName);
+});
+
+handleChecked('term:context-menu', async (_e, { sessionId, hasSelection, linkUrl }) => {
+  const session = runningTerminalSession(sessionId);
+  const canCopy = hasSelection || await tmux.hasPaneSelection(session.tmuxName);
   const action = (name) => () => broadcast('term:context-action', {
     sessionId,
     action: name,
     ...(linkUrl ? { linkUrl } : {}),
   });
   const template = [
-    { label: 'Copy', accelerator: 'Command+C', enabled: !!hasSelection, click: action('copy') },
+    { label: 'Copy', accelerator: 'Command+C', enabled: !!canCopy, click: action('copy') },
     { label: 'Paste', accelerator: 'Command+V', click: action('paste') },
     { label: 'Select All', accelerator: 'Command+A', click: action('select-all') },
     { type: 'separator' },

@@ -18,6 +18,9 @@ function invokeChecked(channel, payload) {
 contextBridge.exposeInMainWorld('hangar', {
   // State agent data may include a bundled icon descriptor (file, monochrome).
   getState:      ()               => invokeChecked('state:get'),
+  getAgentConfiguration: ()       => invokeChecked('agents:get'),
+  previewAgentConfiguration: (json) => invokeChecked('agents:preview', { json }),
+  saveAgentConfiguration: (json, revision) => invokeChecked('agents:save', { json, revision }),
   addProject:    ()               => invokeChecked('project:add'),
   removeProject: (projectId)      => invokeChecked('project:remove', { projectId }),
   moveProject:   (projectId, beforeProjectId) =>
@@ -58,6 +61,7 @@ contextBridge.exposeInMainWorld('hangar', {
   termInput:  (sessionId, data, chatTitle) => invokeChecked('term:input', { sessionId, data, chatTitle }),
   termResize: (sessionId, cols, rows) => invokeChecked('term:resize', { sessionId, cols, rows }),
   termClose:  (sessionId)             => invokeChecked('term:close', { sessionId }),
+  copyTerminalSelection: (sessionId)  => invokeChecked('term:copy-selection', { sessionId }),
   clearTerminal: (sessionId)          => invokeChecked('term:clear', { sessionId }),
   moveTerminalCursor: (sessionId, fromCol, fromRow, toRow, chars) =>
                                      invokeChecked('term:move-cursor', { sessionId, fromCol, fromRow, toRow, chars }),

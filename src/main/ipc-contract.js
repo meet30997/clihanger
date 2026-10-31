@@ -22,6 +22,9 @@ const state = (extraOptional = []) => object(
 
 const invokes = {
   'state:get':             { request: nothing(), response: state() },
+  'agents:get':            { request: nothing(), response: object(['json', 'revision', 'agents'], ['error']) },
+  'agents:preview':        { request: object(['json']), response: object(['valid', 'agents', 'previews'], ['error']) },
+  'agents:save':           { request: object(['json', 'revision']), response: object(['ok'], ['configuration', 'error']) },
   'project:add':           { request: nothing(), response: state() },
   'project:remove':        { request: object(['projectId']), response: state() },
   'project:move':          { request: object(['projectId', 'beforeProjectId']), response: state() },
@@ -42,6 +45,7 @@ const invokes = {
   'term:input':            { request: object(['sessionId', 'data'], ['chatTitle']), response: nothing() },
   'term:resize':           { request: object(['sessionId', 'cols', 'rows']), response: nothing() },
   'term:close':            { request: object(['sessionId']), response: nothing() },
+  'term:copy-selection':   { request: object(['sessionId']), response: object(['copied']) },
   'term:clear':            { request: object(['sessionId']), response: object(['ok']) },
   'term:move-cursor':      { request: object(['sessionId', 'fromCol', 'fromRow', 'toRow', 'chars']), response: object(['moved']) },
   'term:search':           { request: object(['sessionId', 'query', 'direction']), response: object(
