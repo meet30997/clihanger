@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0] — 2026-10-31
+
+### Added
+- **Settings (⌘,):** Turn agent launch options on or off with checkboxes and see the resulting new-session and resume commands before saving. Permission-bypass options start off and say what they disable.
+- **Agent JSON editor:** The **JSON file** tab in Settings shows, formats, copies and saves `~/.hangar/agents.json`. It checks the file before saving and will not overwrite edits made in another editor.
+- **More menu:** Help and Settings now sit in a ⋯ menu in the sidebar.
+
+### Changed
+- **Terminal copy:** Selecting text no longer copies it automatically. Use **Copy** in the right-click menu or ⌘C. The selection stays visible when you right-click or Control-click.
+- **Launch flags in a command:** A built-in agent whose command already includes option flags (for example `agy --dangerously-skip-permissions`) now shows those flags as checked options in Settings.
+
+### Fixed
+- **Repeat notifications:** A reply you have already read is not announced again when the agent redraws its screen or Claude adds a recap line.
+- **Typing after a selection:** Keys typed after selecting text at the bottom of a terminal now go to the shell instead of being swallowed.
+
 ## [0.5.0] — 2026-10-30
 
 ### Added
