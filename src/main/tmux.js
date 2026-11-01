@@ -137,25 +137,29 @@ bind -T root M-Left  if-shell -F "#{alternate_on}" { send-keys M-Left } { send-k
 bind -T root M-Right if-shell -F "#{alternate_on}" { send-keys M-Right } { send-keys -H 1b 66 }
 `;
 
-// Finish a selection without copying, clearing it or moving the viewport.
-// Mouse-aware CLIs still receive ordinary drags; Option-drag stays in xterm.
-const SELECTION_BINDINGS = `# Select terminal text without copying it.
-bind -T root MouseDrag1Pane \\
-  if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" \\
-    { send-keys -M } \\
-    { copy-mode -eM }
+// tmux's own mouse selection (ADR-094): drag, double- or triple-click selects
+// and copies on release via copy-command, as in other terminals. One change
+// from tmux 3.7b's built-in table (ADR-095): a copy made while scrolled into
+// history keeps the viewport there instead of snapping back to the prompt.
+// Spelled out rather than omitted so a running server that sourced an older
+// Hangar override converges on its next attach. Mouse-aware CLIs still
+// receive ordinary mouse input. Double-click treats URLs and paths as words.
+const COPY_ON_RELEASE = 'if-shell -F "#{scroll_position}" { send-keys -X copy-pipe } { send-keys -X copy-pipe-and-cancel }';
+const SELECTION_BINDINGS = `# tmux default mouse selection: copy on release.
+set -gw word-separators " \\"'\`()[]{}<>|,;"
+${['copy-mode', 'copy-mode-vi'].map(table => `unbind -q -T ${table} MouseUp1Pane
+bind -T ${table} MouseDown1Pane select-pane
+bind -T ${table} MouseDrag1Pane select-pane \\; send-keys -X begin-selection
+bind -T ${table} MouseDragEnd1Pane ${COPY_ON_RELEASE}
+bind -T ${table} DoubleClick1Pane select-pane \\; send-keys -X select-word \\; run-shell -d 0.3 \\; ${COPY_ON_RELEASE}
+bind -T ${table} TripleClick1Pane select-pane \\; send-keys -X select-line \\; run-shell -d 0.3 \\; ${COPY_ON_RELEASE}`).join('\n')}
+bind -T root MouseDown1Pane select-pane -t = \\; send-keys -M
+bind -T root MouseDrag1Pane if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -M }
+${[['DoubleClick1Pane', 'select-word'], ['TripleClick1Pane', 'select-line']].map(([key, command]) => `bind -T root ${key} select-pane -t = \\; if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { copy-mode -H ; send-keys -X ${command} ; run-shell -d 0.3 ; send-keys -X copy-pipe-and-cancel }`).join('\n')}
+`;
 
-bind -T copy-mode MouseDragEnd1Pane send-keys -X stop-selection
-bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X stop-selection
-
-# Override tmux's delayed auto-copy while preserving CLI mouse handling.
-${[['DoubleClick1Pane', 'select-word'], ['TripleClick1Pane', 'select-line']].map(([key, command]) => `
-bind -T root ${key} \\
-  if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" \\
-    { send-keys -M } \\
-    { copy-mode -e ; send-keys -X ${command} }
-${['copy-mode', 'copy-mode-vi'].map(table => `bind -T ${table} ${key} select-pane \\; send-keys -X ${command}`).join('\n')}
-`).join('')}`;
+// The 0.6.0 non-copying block, removed from existing tmux.conf files.
+const LEGACY_SELECTION_BLOCK = /^# Select terminal text without copying it\.\n[\s\S]*?^bind -T copy-mode-vi TripleClick1Pane select-pane \\; send-keys -X select-line\n/m;
 
 // macOS paints text selection with live system colours. Main supplies those
 // values at boot and when appearance preferences change; these
@@ -233,7 +237,7 @@ function ensureTmuxConf() {
     const migrated = current.replace(
       /^# Copy without losing the scroll position\.\n[\s\S]*?(?=\n# Replace tmux's right-click pane menu)/m,
       SELECTION_BINDINGS,
-    ).replace('# A completed mouse/keyboard selection is copied to the macOS pasteboard.\n# tmux\'s default copy-mode bindings already call copy-pipe-and-cancel.',
+    ).replace(LEGACY_SELECTION_BLOCK, SELECTION_BINDINGS).replace('# A completed mouse/keyboard selection is copied to the macOS pasteboard.\n# tmux\'s default copy-mode bindings already call copy-pipe-and-cancel.',
       '# Explicit Copy sends the selected text to the macOS pasteboard.');
     if (migrated !== current) {
       fs.writeFileSync(CONF, migrated, 'utf8');
@@ -283,7 +287,7 @@ bind -T root WheelDownPane \\
         current = updated;
       }
     }
-    if (!current.includes('# Select terminal text without copying it.')) {
+    if (!current.includes('# tmux default mouse selection: copy on release.')) {
       fs.appendFileSync(CONF, `\n${SELECTION_BINDINGS}`, 'utf8');
     }
     if (!current.includes('extended-keys-format csi-u')) {

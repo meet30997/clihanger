@@ -1253,8 +1253,8 @@ $('#tree')?.addEventListener('keydown', (e) => {
 
 /* ---------- Terminals & WebLinks ---------- */
 
-// xterm owns local (Option-drag) selections; tmux owns ordinary selections.
-// Neither writes to the pasteboard until the user explicitly chooses Copy.
+// tmux owns ordinary selections and copies them on release (ADR-094). xterm
+// owns local (Option-drag) selections, which Copy writes to the pasteboard.
 async function copyTerminalSelection(sessionId) {
   const entry = terms.get(sessionId);
   if (!entry) return;
@@ -1507,6 +1507,18 @@ function getTerm(sessionId) {
 
   term.open(el);
   term.attachCustomWheelEventHandler((event) => forwardWheelToTmux(sessionId, term, event));
+  // OSC 52: a program's own copy (nvim "+y, a CLI's copy command) reaches the
+  // Mac pasteboard, relayed by tmux's set-clipboard (ADR-095). Writes only:
+  // a "?" read request is never answered, so programs cannot read the clipboard.
+  term.parser.registerOscHandler(52, (data) => {
+    const payload = data.slice(data.indexOf(';') + 1);
+    if (!payload || payload === '?' || payload.length > 8 * 1024 * 1024) return true;
+    try {
+      const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+      window.hangar.copyText(new TextDecoder().decode(bytes));
+    } catch {}
+    return true;
+  });
   // xterm 6 collapses Shift/Ctrl-Enter to CR. Agent editors need Shift-Enter;
   // regular shells need a bracketed-paste newline to avoid execution.
   term.attachCustomKeyEventHandler((event) => {
@@ -1527,15 +1539,18 @@ function getTerm(sessionId) {
     event.preventDefault();
     return false;
   });
-  // A selection made at the live bottom holds the pane in copy mode only to
-  // keep its highlight. Typing dismisses it first, as in any terminal; copy
-  // mode would otherwise swallow the keys, and its Enter would copy-pipe.
+  // Holds input until tmux has left copy mode (see onData below).
   let inputGate = null;
   term.onData((data) => {
     const chatTitle = submittedChatTitle(sessionId, term, data);
     const scroll = terminalScrollStates.get(sessionId);
-    const isMouseReport = data.startsWith('\x1b[<') || data.startsWith('\x1b[M');
-    if (scroll?.inCopyMode && scroll.scrollPosition === 0 && !isMouseReport) {
+    // Typing or pasting while scrolled into history jumps back to the prompt
+    // first, as in Terminal.app; copy mode would otherwise run the keys as its
+    // own commands (q, g, Space, Enter) and lose them (ADR-095). Mouse and
+    // focus reports are not typing and leave the viewport alone.
+    const isTerminalReport = data.startsWith('\x1b[<') || data.startsWith('\x1b[M')
+      || data === '\x1b[I' || data === '\x1b[O';
+    if (scroll?.inCopyMode && !isTerminalReport) {
       updateCopyModeBadge(sessionId, { inCopyMode: false, scrollPosition: 0 });
       const gate = window.hangar.scrollTerminalToBottom(sessionId)
         .then((next) => updateCopyModeBadge(sessionId, next))
