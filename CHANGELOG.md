@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.1] — 2026-11-02
+
+### Changed
+- **Terminal copy:** Selecting text copies it when you release the mouse again, as in other Mac terminals and tmux. Drag, double-click (word) or triple-click (line), then paste. Option-drag still selects locally for ⌘C when a CLI handles the mouse.
+- **Double-click:** Selects a whole URL or file path instead of a fragment.
+
+### Fixed
+- **Copying from history:** Copying while scrolled up keeps your place instead of jumping back to the prompt.
+- **Copy from inside a CLI:** A program's own copy command (OSC 52, for example `"+y` in nvim) now reaches the Mac clipboard. Programs cannot read the clipboard.
+- **Typing while scrolled up:** Typing or pasting while reading history returns to the prompt and delivers the text, instead of tmux treating the keys as commands.
+
 ## [0.6.0] — 2026-10-31
 
 ### Added
